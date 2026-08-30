@@ -203,7 +203,17 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .cfd-section-body{background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:12px 14px;}
 .cfd-two-col{display:grid;grid-template-columns:3fr 2fr;gap:14px;align-items:start;}
 @media (max-width:1100px){.cfd-two-col{grid-template-columns:1fr;}}
-.cfd-main-row{flex:1;min-height:0;align-items:stretch;}
+
+/* Explicit grid, not flexbox, for the dashboard screen: topbar/KPI strip/
+   ODC CLINs/forecast bar are all auto-sized (their own content, never
+   squeezed), and the main Labor CLINs + ODC/chart row is the ONE row that
+   gets whatever vertical space is left (1fr) and scrolls internally. This
+   replaced an earlier flexbox layout where fixed-height siblings competed
+   for shrink priority with no guaranteed winner — on a short viewport the
+   ODC CLINs section could be squeezed to near-nothing instead of the
+   flexible row giving up space first. */
+#screen-home.active{display:grid;grid-template-rows:auto auto 1fr auto auto auto;gap:10px;height:100%;min-height:0;}
+.cfd-main-row{min-height:0;align-items:stretch;overflow:hidden;}
 .cfd-section-fill{display:flex;flex-direction:column;height:100%;min-height:0;}
 .cfd-section-fill .cfd-section-body{flex:1;min-height:0;overflow-y:auto;}
 .cfd-right-col{display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;}

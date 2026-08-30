@@ -54,3 +54,4 @@ Do not commit a service role key anywhere in this repo.
 4. Update Auth → Site URL / Redirect URLs once the Vercel domain is live.
 
 See `docs/HANDOFF.md` for the full design history.
+

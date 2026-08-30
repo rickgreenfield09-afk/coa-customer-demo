@@ -1,0 +1,23 @@
+# Environment / secrets — never commit Supabase keys
+.env
+.env.local
+.env.*.local
+js/env.js
+
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json.bak
+
+# Vercel
+.vercel/
+
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp

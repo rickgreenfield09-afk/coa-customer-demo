@@ -1,0 +1,260 @@
+/* COA Customer Demo — styles.css
+   Design tokens and shell/component patterns adapted from the COA Employee
+   Portal (coa-employee-portal / COA-pilot-portal) for visual consistency
+   across both apps. Trimmed to what this demo's screens need: role picker,
+   Contract Financial Dashboard (tree + detail split, status pills), Travel
+   estimate/reimbursement, and white-label settings. Dark mode is default;
+   [data-theme="light"] overrides tokens only, never edits :root directly. */
+
+:root{--void:#0D1117;--surface:#161C26;--raised:#1E2733;--teal:#2AB8A6;--amber:#E8B84B;--red:#E05252;--purple:#BF5FFF;--header:#3E4E6C;--text:#F2EDE4;--sub:#8E92B0;--muted:#5C607E;--border:#2E3440;}
+
+[data-theme="light"]{--void:#EBEAE3;--surface:#FFFFFF;--raised:#EEF1F6;--teal:#122A54;--amber:#8A5A00;--red:#C42430;--purple:#7A3FD1;--header:#122A54;--text:#1B1D22;--sub:#5C6472;--muted:#767C8A;--border:#D7D7CD;}
+
+[data-theme="light"] .login-card,
+[data-theme="light"] .placeholder-card,
+[data-theme="light"] .modal-box,
+[data-theme="light"] .dash-header-strip,
+[data-theme="light"] .dash-card,
+[data-theme="light"] .tk-entry-card{box-shadow:0 1px 2px rgba(18,26,43,0.05),0 4px 14px rgba(18,26,43,0.06);}
+
+[data-theme="light"] .logo{color:#FFFFFF;}
+[data-theme="light"] .user-email{color:#AEB8CC;}
+[data-theme="light"] .btn-logout{background:rgba(255,255,255,0.14);border-color:rgba(255,255,255,0.24);color:#FFFFFF;}
+[data-theme="light"] .nav-btn.active{border-bottom-color:var(--red);}
+
+[data-theme="light"] .tk-status-pill.approved{background:rgba(18,42,84,0.10);}
+[data-theme="light"] .tk-status-pill.paid{background:rgba(18,42,84,0.10);}
+[data-theme="light"] .warning-box{background:rgba(138,90,0,0.10);}
+[data-theme="light"] .tk-status-pill.submitted{background:rgba(138,90,0,0.12);}
+[data-theme="light"] .tk-status-pill.pending{background:rgba(138,90,0,0.12);}
+[data-theme="light"] .tk-status-pill.open{background:rgba(18,42,84,0.06);}
+[data-theme="light"] .bd-tree-row.selected{background:rgba(18,42,84,0.08);}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+html{height:100%;}
+body{background:var(--void);color:var(--text);font-family:'DM Sans',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ---------- Login / role picker ---------- */
+.login-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:40px;width:100%;max-width:380px;}
+.login-logo{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:3px;color:var(--teal);text-align:center;margin-bottom:4px;}
+.login-sub{font-size:12px;font-family:'DM Mono',monospace;color:var(--sub);text-align:center;margin-bottom:28px;letter-spacing:1px;}
+.field-label{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;display:block;}
+.field-input{width:100%;background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:12px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;outline:none;transition:border-color 0.15s;margin-bottom:18px;}
+.field-input:focus{border-color:var(--teal);}
+.field-input::placeholder{color:var(--muted);}
+input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);cursor:pointer;}
+.btn{width:100%;padding:12px;border-radius:6px;border:none;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s;}
+.btn-primary{background:var(--teal);color:var(--void);}
+.btn-primary:hover{background:#35d4c0;}
+.btn-primary:disabled{background:var(--border);color:var(--muted);cursor:default;}
+.btn-danger{background:var(--red);color:#fff;}
+.btn-danger:hover{background:#ea6b6b;}
+.login-error{font-size:12px;color:var(--red);font-family:'DM Mono',monospace;margin-top:14px;text-align:center;min-height:16px;}
+
+/* Role picker cards — radio-button-equivalent persona selection */
+.persona-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:20px 0;}
+.persona-card{background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:16px;cursor:pointer;transition:border-color .15s;}
+.persona-card:hover{border-color:var(--teal);}
+.persona-card.selected{border-color:var(--teal);background:rgba(42,184,166,0.10);}
+.persona-card-role{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;}
+.persona-card-desc{font-size:12px;color:var(--sub);line-height:1.4;}
+@media (max-width:700px){.persona-grid{grid-template-columns:1fr;}}
+
+/* ---------- App shell ---------- */
+#app-shell{display:none;flex:1;flex-direction:column;min-height:0;}
+#app-shell.active{display:flex;}
+header{background:var(--header);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;}
+.logo-wrap{display:flex;align-items:center;gap:12px;}
+.logo{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:3px;color:var(--teal);}
+.header-right{display:flex;align-items:center;gap:14px;}
+.user-email{font-size:12px;color:var(--sub);font-family:'DM Mono',monospace;}
+.btn-logout{background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:7px 14px;font-size:12px;color:var(--sub);cursor:pointer;transition:all 0.15s;}
+.btn-logout:hover{border-color:var(--red);color:var(--red);}
+nav{background:var(--surface);border-bottom:1px solid var(--border);display:flex;padding:0 24px;gap:4px;flex-shrink:0;}
+.nav-btn{background:none;border:none;color:var(--sub);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;padding:14px 16px;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;}
+.nav-btn:hover{color:var(--text);}
+.nav-btn.active{color:var(--teal);border-bottom-color:var(--teal);}
+main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+.screen{display:none;animation:fadeIn 0.2s ease;overflow-y:auto;min-height:0;}
+.screen.active{display:flex;flex:1;flex-direction:column;gap:10px;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.placeholder-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:40px;text-align:center;}
+.placeholder-title{font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--text);margin-bottom:8px;}
+.placeholder-sub{font-size:13px;color:var(--sub);}
+
+.subtab-bar{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.subtab-btn{background:none;border:none;color:var(--sub);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;}
+.subtab-btn:hover{color:var(--text);}
+.subtab-btn.active{color:var(--teal);border-bottom-color:var(--teal);}
+.subscreen{display:none;}
+.subscreen.active{display:block;}
+
+/* ---------- Modal ---------- */
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:100;}
+.modal-overlay.active{display:flex;}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:28px;max-width:380px;width:90%;}
+.modal-title{font-family:'Bebas Neue',sans-serif;font-size:20px;margin-bottom:10px;}
+.modal-text{font-size:13px;color:var(--sub);margin-bottom:20px;line-height:1.5;}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+
+/* ---------- Generic cards / forms ---------- */
+.tk-entry-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:24px;}
+.tk-section-title{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;}
+.tk-empty{font-size:13px;color:var(--muted);padding:16px 0;}
+.asset-form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+@media (max-width:800px){.asset-form-grid{grid-template-columns:1fr 1fr;}}
+@media (max-width:500px){.asset-form-grid{grid-template-columns:1fr;}}
+.btn-edit{padding:9px 18px;border-radius:6px;border:1px solid var(--border);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;background:var(--raised);color:var(--teal);transition:all 0.15s;}
+.btn-edit:hover{border-color:var(--teal);}
+.btn-cancel{padding:9px 18px;border-radius:6px;border:1px solid var(--border);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--sub);}
+.btn-cancel:hover{color:var(--text);}
+.tk-grid-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
+
+.tk-status-pill{font-size:11px;font-family:'DM Mono',monospace;padding:3px 9px;border-radius:10px;display:inline-block;}
+.tk-status-pill.draft{background:var(--raised);color:var(--sub);}
+.tk-status-pill.submitted{background:rgba(232,184,75,0.12);color:var(--amber);}
+.tk-status-pill.pending{background:rgba(232,184,75,0.12);color:var(--amber);}
+.tk-status-pill.open{background:rgba(232,184,75,0.12);color:var(--amber);}
+.tk-status-pill.approved{background:rgba(42,184,166,0.12);color:var(--teal);}
+.tk-status-pill.paid{background:rgba(42,184,166,0.12);color:var(--teal);}
+.tk-status-pill.closed{background:rgba(42,184,166,0.12);color:var(--teal);}
+.tk-status-pill.rejected{background:rgba(224,82,82,0.12);color:var(--red);}
+.tk-status-pill.cancelled{background:var(--raised);color:var(--muted);}
+.tk-status-pill.expensed{background:rgba(191,95,255,0.12);color:var(--purple);}
+
+.danger-box{background:rgba(224,82,82,0.08);border:1px solid var(--red);border-radius:8px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px;}
+.danger-box-title{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;color:var(--red);margin-bottom:4px;}
+.danger-box-text{font-size:13px;color:var(--text);}
+.warning-box{background:rgba(232,184,75,0.08);border:1px solid var(--amber);border-radius:8px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px;}
+.warning-box-title{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;color:var(--amber);margin-bottom:4px;}
+.warning-box-text{font-size:13px;color:var(--text);}
+
+/* ---------- Dashboard (Contract Financial Dashboard) ---------- */
+.dash-header-strip{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px 28px;margin-bottom:20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+.dash-header-meta{display:flex;gap:24px;flex-wrap:wrap;margin-left:auto;}
+.dash-meta-item{font-size:12px;color:var(--sub);}
+.dash-meta-item span{display:block;font-size:13px;color:var(--text);font-family:'DM Mono',monospace;margin-top:2px;}
+.dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.dash-grid-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;}
+.dash-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:18px 20px;height:100%;box-sizing:border-box;}
+.dash-card-title{font-size:11px;font-family:'DM Mono',monospace;color:var(--teal);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;}
+.dash-card-empty{font-size:13px;color:var(--sub);padding:8px 0;}
+@media (max-width:900px){.dash-grid{grid-template-columns:1fr;}.dash-grid-2col{grid-template-columns:1fr;}.dash-header-meta{margin-left:0;}}
+
+/* Tree + detail split — used for the SLIN/billing-node tree */
+.bd-layout{display:flex;gap:20px;align-items:flex-start;}
+.bd-tree-panel{flex:0 0 340px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;max-height:70vh;overflow-y:auto;}
+.bd-detail-panel-col{flex:1;min-width:0;}
+@media (max-width:900px){.bd-layout{flex-direction:column;}.bd-tree-panel{flex:1 1 auto;max-height:none;width:100%;}}
+.bd-tree{display:flex;flex-direction:column;}
+.bd-tree-row{display:flex;align-items:center;gap:6px;padding-top:6px;padding-bottom:6px;border-radius:4px;cursor:default;}
+.bd-tree-row.selected{background:rgba(42,184,166,0.1);}
+.bd-tree-caret{width:14px;flex-shrink:0;color:var(--muted);cursor:pointer;font-size:11px;}
+.bd-tree-label{flex:1;font-size:13px;color:var(--text);cursor:pointer;}
+.bd-tree-row.selected .bd-tree-label{color:var(--teal);font-weight:600;}
+.bd-tree-type-tag{font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;}
+.bd-ledger{display:flex;flex-direction:column;gap:8px;}
+.bd-ledger-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--raised);border-radius:6px;padding:10px 14px;}
+
+/* ---------- Appearance toggle (Settings screen) ---------- */
+.theme-toggle-wrap{display:flex;align-items:center;gap:10px;}
+.theme-toggle-label{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1px;text-transform:uppercase;}
+.theme-toggle-switch{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.theme-toggle-btn{background:var(--raised);border:none;padding:7px 14px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;color:var(--sub);cursor:pointer;transition:all 0.15s;}
+.theme-toggle-btn+.theme-toggle-btn{border-left:1px solid var(--border);}
+.theme-toggle-btn:hover{color:var(--text);}
+.theme-toggle-btn.active{background:var(--teal);color:var(--void);cursor:default;}
+
+/* ---------- Contract Financial Dashboard (cfd-*) ----------
+   Fixed semantic accent colors (blue/purple/green/orange/red) are
+   deliberately NOT theme tokens — they identify a KPI category (funded,
+   ODC, balance, projection, risk) consistently in both themes, the same
+   way tk-status-pill's amber/red/purple are fixed regardless of theme. */
+:root{--cfd-blue:#2F6FEB;--cfd-purple:#8B5CF6;--cfd-green:#1FAA59;--cfd-orange:#E07C1F;--cfd-red:#D6363F;}
+
+.cfd-topbar{background:var(--header);border-radius:8px;padding:12px 20px;flex-shrink:0;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
+.cfd-topbar-title{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:#fff;}
+.cfd-topbar-filters{display:flex;gap:12px;margin-left:auto;flex-wrap:wrap;}
+.cfd-filter-item{display:flex;flex-direction:column;gap:4px;}
+.cfd-filter-label{font-size:9px;font-family:'DM Mono',monospace;color:#AEB8CC;letter-spacing:1px;text-transform:uppercase;}
+.cfd-filter-item select,.cfd-filter-item > input{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:7px 10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:12px;min-width:140px;}
+.cfd-filter-item select option{color:#111;}
+.cfd-slin-picker-btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:7px 10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:12px;min-width:140px;text-align:left;cursor:pointer;position:relative;}
+.cfd-filter-item{position:relative;}
+.cfd-slin-picker-panel{position:absolute;top:100%;right:0;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;width:380px;max-height:280px;overflow-y:auto;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.3);}
+.cfd-slin-picker-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--text);}
+.cfd-slin-picker-row input{flex-shrink:0;}
+.cfd-slin-picker-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;}
+.cfd-slin-picker-actions{display:flex;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.cfd-slin-picker-actions button{font-size:11px;background:none;border:none;color:var(--teal);cursor:pointer;padding:0;}
+
+.cfd-kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex-shrink:0;}
+@media (max-width:1200px){.cfd-kpi-strip{grid-template-columns:repeat(3,1fr);}}
+@media (max-width:700px){.cfd-kpi-strip{grid-template-columns:repeat(2,1fr);}}
+.cfd-kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;display:flex;gap:8px;align-items:flex-start;}
+.cfd-kpi-icon{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;}
+.cfd-kpi-label{font-size:9px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:0.5px;text-transform:uppercase;}
+.cfd-kpi-value{font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--text);margin-top:1px;}
+.cfd-kpi-sub{font-size:10px;color:var(--sub);margin-top:1px;}
+
+.cfd-section{margin-bottom:0;}
+.cfd-section-bar{background:var(--header);color:#fff;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.5px;padding:7px 14px;border-radius:8px 8px 0 0;flex-shrink:0;}
+.cfd-section-body{background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:12px 14px;}
+.cfd-two-col{display:grid;grid-template-columns:3fr 2fr;gap:14px;align-items:start;}
+@media (max-width:1100px){.cfd-two-col{grid-template-columns:1fr;}}
+.cfd-main-row{flex:1;min-height:0;align-items:stretch;}
+.cfd-section-fill{display:flex;flex-direction:column;height:100%;min-height:0;}
+.cfd-section-fill .cfd-section-body{flex:1;min-height:0;overflow-y:auto;}
+.cfd-right-col{display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;}
+.cfd-right-col .cfd-section{display:flex;flex-direction:column;min-height:0;}
+
+.cfd-labor-card{border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+.cfd-labor-card:last-child{margin-bottom:0;}
+.cfd-labor-main{flex:1;min-width:200px;}
+.cfd-labor-title{font-size:13px;font-weight:600;color:var(--text);}
+.cfd-labor-sub{font-size:10px;color:var(--sub);margin-top:1px;}
+.cfd-labor-figures{display:flex;gap:14px;font-size:10px;color:var(--sub);margin-top:6px;flex-wrap:wrap;}
+.cfd-labor-figures strong{display:block;color:var(--text);font-size:12px;}
+.cfd-progress-track{background:var(--raised);border-radius:4px;height:5px;overflow:hidden;margin-top:6px;}
+.cfd-progress-fill{height:100%;border-radius:4px;}
+.cfd-gauge-wrap{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;}
+.cfd-gauge{width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text);}
+.cfd-gauge-inner{width:37px;height:37px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;}
+.cfd-gauge-label{font-size:9px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;}
+
+.cfd-odc-table{width:100%;border-collapse:collapse;font-size:12px;}
+.cfd-odc-table th{text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;padding:6px 8px;border-bottom:1px solid var(--border);}
+.cfd-odc-table td{padding:8px;border-bottom:1px solid var(--border);color:var(--text);}
+.cfd-odc-table tfoot td{font-weight:700;border-top:2px solid var(--border);border-bottom:none;}
+
+.cfd-odc-clins{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+@media (max-width:900px){.cfd-odc-clins{grid-template-columns:1fr;}}
+.cfd-odc-clin-card{border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center;}
+.cfd-odc-clin-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;}
+.cfd-odc-clin-sub{font-size:11px;color:var(--sub);margin-bottom:10px;}
+.cfd-odc-legend{display:flex;justify-content:center;gap:14px;font-size:10px;color:var(--sub);margin-top:8px;flex-wrap:wrap;}
+.cfd-odc-legend span{display:inline-flex;align-items:center;gap:4px;}
+.cfd-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+
+.cfd-exhaustion-banner{background:rgba(214,54,63,0.10);border:1px solid var(--cfd-red);border-radius:6px;padding:6px 12px;color:var(--cfd-red);font-size:11px;font-weight:700;text-align:center;margin-top:6px;}
+
+.cfd-forecast-bar{background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:8px 16px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;}
+.cfd-forecast-item{font-size:11px;color:var(--sub);}
+.cfd-forecast-item strong{display:block;font-size:15px;color:var(--text);font-family:'DM Mono',monospace;margin-top:2px;}
+.cfd-confidence-pill{font-size:11px;font-weight:700;padding:4px 12px;border-radius:12px;text-transform:uppercase;letter-spacing:0.5px;}
+.cfd-confidence-high{background:rgba(31,170,89,0.15);color:var(--cfd-green);}
+.cfd-confidence-medium{background:rgba(224,124,31,0.15);color:var(--cfd-orange);}
+.cfd-confidence-low{background:rgba(214,54,63,0.15);color:var(--cfd-red);}
+
+/* ---------- Print (Travel Estimate / dashboard export) ---------- */
+@media print{
+  body > *:not(.print-only){display:none !important;}
+  .print-only{display:block !important;position:static !important;width:100%;}
+}
+.print-only{display:none;}
+.print-page{padding:40px;color:#111;background:#fff;}
+.print-page .print-title{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:2px;margin-bottom:4px;}
+.print-page .print-sub{font-size:12px;color:#555;margin-bottom:20px;}
+.print-page table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+.print-page th,.print-page td{text-align:left;padding:6px 8px;border-bottom:1px solid #ccc;font-size:13px;}

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Axiom Forward Consulting — Contract Portal Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script>
+  // Apply the last-used Appearance preference before first paint, so a
+  // light-mode guest doesn't see a flash of dark on refresh while the
+  // profile (the source of truth) is still loading. app.js reconciles
+  // this cached guess against profiles.theme_preference once it loads.
+  (function(){
+    try{
+      if(localStorage.getItem('axiom_theme') === 'light'){
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    }catch(e){ /* localStorage unavailable (private mode, etc.) — default dark is fine */ }
+  })();
+</script>
+</head>
+<body>
+
+  <!-- LOGIN / MAGIC LINK SCREEN -->
+  <div class="login-wrap" id="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">AXIOM FORWARD</div>
+      <div class="login-sub">CONTRACT PORTAL DEMO</div>
+      <div id="login-form">
+        <label class="field-label" for="login-email">Email</label>
+        <input type="email" id="login-email" class="field-input" placeholder="you@company.com" autocomplete="username">
+        <button class="btn btn-primary" id="login-btn" onclick="handleSendMagicLink()">Send Magic Link</button>
+      </div>
+      <div id="login-sent" style="display:none;">
+        <div class="placeholder-sub" style="text-align:center;">Check your email for a sign-in link. You can close this tab.</div>
+      </div>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- APP SHELL -->
+  <div id="app-shell">
+    <header>
+      <div class="logo-wrap">
+        <div class="logo" id="header-company-name">AXIOM FORWARD</div>
+      </div>
+      <div class="header-right">
+        <span class="user-email" id="user-email-display"></span>
+        <button class="btn-logout" id="switch-role-btn" onclick="showRolePicker()" style="display:none;">Switch Role</button>
+        <button class="btn-logout" onclick="handleSignOut()">Sign Out</button>
+      </div>
+    </header>
+    <nav id="app-nav" style="display:none;">
+      <button class="nav-btn active" data-screen="home" onclick="switchScreen('home')">Dashboard</button>
+      <button class="nav-btn" data-screen="travel" onclick="switchScreen('travel')">Travel</button>
+      <button class="nav-btn" data-screen="settings" onclick="switchScreen('settings')">Settings</button>
+    </nav>
+    <main>
+      <div class="screen active" id="screen-role-picker">
+        <div class="tk-entry-card" style="max-width:720px;margin:0 auto;">
+          <div class="tk-section-title">Choose a role to explore the demo</div>
+          <div id="persona-grid-employee" class="persona-grid"></div>
+          <div class="tk-section-title" style="margin-top:20px;">Customer-side roles</div>
+          <div id="persona-grid-customer" class="persona-grid"></div>
+          <div class="login-error" id="persona-error"></div>
+        </div>
+      </div>
+      <div class="screen" id="screen-home">
+        <div class="cfd-topbar">
+          <div class="cfd-topbar-title">Contract Financial Dashboard</div>
+          <div class="cfd-topbar-filters">
+            <div class="cfd-filter-item"><span class="cfd-filter-label">Customer</span><select id="cfd-filter-customer"></select></div>
+            <div class="cfd-filter-item"><span class="cfd-filter-label">Contract</span><select id="cfd-filter-contract"></select></div>
+            <div class="cfd-filter-item"><span class="cfd-filter-label">Task Order</span><select id="cfd-filter-taskorder"></select></div>
+            <div class="cfd-filter-item">
+              <span class="cfd-filter-label">CLINs / SLINs</span>
+              <button type="button" class="cfd-slin-picker-btn" id="cfd-slin-picker-btn" onclick="toggleSlinPicker()">All SLINs</button>
+              <div class="cfd-slin-picker-panel" id="cfd-slin-picker-panel" style="display:none;"></div>
+            </div>
+            <div class="cfd-filter-item"><span class="cfd-filter-label">Start Date</span><input type="date" id="cfd-filter-start"></div>
+            <div class="cfd-filter-item"><span class="cfd-filter-label">End Date</span><input type="date" id="cfd-filter-end"></div>
+          </div>
+        </div>
+
+        <div class="cfd-kpi-strip">
+          <div class="cfd-kpi-card"><div class="cfd-kpi-icon" style="background:var(--cfd-blue);">$</div><div><div class="cfd-kpi-label">Total Funded Value</div><div class="cfd-kpi-value" id="cfd-kpi-funded">—</div><div class="cfd-kpi-sub" id="cfd-kpi-funded-sub"></div></div></div>
+          <div class="cfd-kpi-card"><div class="cfd-kpi-icon" style="background:var(--cfd-blue);">↗</div><div><div class="cfd-kpi-label">Actual Cost / Billings</div><div class="cfd-kpi-value" id="cfd-kpi-actual">—</div><div class="cfd-kpi-sub" id="cfd-kpi-actual-sub"></div></div></div>
+          <div class="cfd-kpi-card"><div class="cfd-kpi-icon" style="background:var(--cfd-purple);">◇</div><div><div class="cfd-kpi-label">ODC Commitments</div><div class="cfd-kpi-value" id="cfd-kpi-odc">—</div><div class="cfd-kpi-sub" id="cfd-kpi-odc-sub"></div></div></div>
+          <div class="cfd-kpi-card"><div class="cfd-kpi-icon" style="background:var(--cfd-green);">$</div><div><div class="cfd-kpi-label">Available Balance</div><div class="cfd-kpi-value" id="cfd-kpi-balance">—</div><div class="cfd-kpi-sub" id="cfd-kpi-balance-sub"></div></div></div>
+          <div class="cfd-kpi-card"><div class="cfd-kpi-icon" style="background:var(--cfd-orange);">◎</div><div><div class="cfd-kpi-label">Projected At Completion</div><div class="cfd-kpi-value" id="cfd-kpi-eac">—</div><div class="cfd-kpi-sub" id="cfd-kpi-eac-sub"></div></div></div>
+          <div class="cfd-kpi-card"><div class="cfd-kpi-icon" style="background:var(--cfd-red);">▤</div><div><div class="cfd-kpi-label">Projected Exhaustion</div><div class="cfd-kpi-value" id="cfd-kpi-exhaustion">—</div><div class="cfd-kpi-sub" id="cfd-kpi-exhaustion-sub"></div></div></div>
+        </div>
+
+        <div class="cfd-two-col cfd-main-row">
+          <div class="cfd-section cfd-section-fill">
+            <div class="cfd-section-bar">LABOR CLINs</div>
+            <div class="cfd-section-body" id="cfd-labor-clins"><div class="tk-empty">Loading...</div></div>
+          </div>
+          <div class="cfd-right-col">
+            <div class="cfd-section" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+              <div class="cfd-section-bar">OPEN ODC COMMITMENTS</div>
+              <div class="cfd-section-body" id="cfd-odc-table-wrap" style="overflow:auto;flex:1;min-height:0;"><div class="tk-empty">Loading...</div></div>
+            </div>
+            <div class="cfd-section" style="flex-shrink:0;max-height:145px;display:flex;flex-direction:column;">
+              <div class="cfd-section-bar">BURN TREND (TOTAL TASK ORDER)</div>
+              <div class="cfd-section-body" style="overflow-y:auto;">
+                <div id="cfd-chart-wrap"><div class="dash-card-empty">Loading...</div></div>
+                <div id="cfd-exhaustion-banner-wrap"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cfd-section" style="flex-shrink:0;">
+          <div class="cfd-section-bar">ODC CLINs (Gauge = Actual Spend + Committed + Funded ODC)</div>
+          <div class="cfd-section-body" style="max-height:150px;overflow-y:auto;"><div class="cfd-odc-clins" id="cfd-odc-clins"><div class="tk-empty">Loading...</div></div></div>
+        </div>
+
+        <div class="cfd-forecast-bar" id="cfd-forecast-bar" style="flex-shrink:0;"><div class="tk-empty">Loading...</div></div>
+
+        <div id="cfd-edit-wrap" style="flex-shrink:0;"></div>
+      </div>
+      <div class="screen" id="screen-travel">
+        <div class="placeholder-card">
+          <div class="placeholder-title">Travel</div>
+          <div class="placeholder-sub">Coming next session.</div>
+        </div>
+      </div>
+      <div class="screen" id="screen-settings">
+        <div class="tk-entry-card" style="max-width:480px;">
+          <div class="tk-section-title">Appearance</div>
+          <div class="theme-toggle-wrap">
+            <span class="theme-toggle-label">Theme</span>
+            <div class="theme-toggle-switch">
+              <button type="button" class="theme-toggle-btn" id="theme-btn-dark" onclick="setThemePreference('dark')">Dark</button>
+              <button type="button" class="theme-toggle-btn" id="theme-btn-light" onclick="setThemePreference('light')">Light</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/env.js"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

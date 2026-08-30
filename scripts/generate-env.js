@@ -5,8 +5,15 @@
 // README) — this script only needs to run in CI/deploy.
 const fs = require('fs');
 
-const url = process.env.SUPABASE_URL || '';
-const anonKey = process.env.SUPABASE_ANON_KEY || '';
+// Strip stray leading/trailing quotes in case the value was pasted into
+// Vercel's dashboard including quote characters (e.g. "eyJ..." instead of
+// eyJ...) — a JWT/URL never legitimately contains a leading/trailing ".
+function unquote(v) {
+  return v.replace(/^"(.*)"$/, '$1');
+}
+
+const url = unquote(process.env.SUPABASE_URL || '');
+const anonKey = unquote(process.env.SUPABASE_ANON_KEY || '');
 
 if (!url || !anonKey) {
   console.warn('SUPABASE_URL / SUPABASE_ANON_KEY not set — js/env.js will be written with empty values.');

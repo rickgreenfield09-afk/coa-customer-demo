@@ -194,9 +194,20 @@ async function setThemePreference(pref){
   }
 }
 
-// ---------- Small shared util (mirrors app-core.js's escAttr in the pilot portal) ----------
+// ---------- Small shared utils (mirror app-core.js's escAttr/formatDate in the pilot portal) ----------
 function escAttr(v){
   return (v == null ? '' : String(v)).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Plain YYYY-MM-DD strings must be parsed as local calendar components, not
+// UTC midnight — `new Date(d)` on a date-only string parses as UTC, so
+// anyone west of UTC sees every date render one day early once
+// toLocaleDateString() converts back to local time.
+function formatDate(d){
+  if(!d){ return '—'; }
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d));
+  var dt = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(d);
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 // ---------- Boot ----------

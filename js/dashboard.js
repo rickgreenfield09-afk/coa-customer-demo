@@ -460,14 +460,15 @@ function renderOdcClins(slinIds, asOfDate){
       + '</div></div>';
 
     return '<div class="cfd-odc-clin-card">'
+      + gauge
+      + '<div class="cfd-odc-clin-info">'
       + '<div class="cfd-odc-clin-title">' + escAttr(s.slin_code) + ' — ' + escAttr(s.slin_description || s.slin_category) + '</div>'
       + '<div class="cfd-odc-clin-sub">Funded: ' + money(m.funded, true) + '</div>'
-      + gauge
       + '<div class="cfd-odc-legend">'
       + '<span><span class="cfd-dot" style="background:var(--cfd-green);"></span>Actual ' + money(m.actual, true) + '</span>'
       + '<span><span class="cfd-dot" style="background:var(--cfd-purple);"></span>Committed ' + money(m.committedOdc, true) + '</span>'
       + '<span><span class="cfd-dot" style="background:var(--raised);border:1px solid var(--border);"></span>Available ' + money(m.available, true) + '</span>'
-      + '</div></div>';
+      + '</div></div></div>';
   }).join('');
 }
 

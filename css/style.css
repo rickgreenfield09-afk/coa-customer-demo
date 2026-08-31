@@ -173,7 +173,7 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
    way tk-status-pill's amber/red/purple are fixed regardless of theme. */
 :root{--cfd-blue:#2F6FEB;--cfd-purple:#8B5CF6;--cfd-green:#1FAA59;--cfd-orange:#E07C1F;--cfd-red:#D6363F;}
 
-.cfd-topbar{background:var(--header);border-radius:8px;padding:12px 20px;flex-shrink:0;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
+.cfd-topbar{background:var(--header);border-radius:8px;padding:8px 20px;flex-shrink:0;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
 .cfd-topbar-title{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:#fff;}
 .cfd-topbar-filters{display:flex;gap:12px;margin-left:auto;flex-wrap:wrap;}
 .cfd-filter-item{display:flex;flex-direction:column;gap:4px;}
@@ -192,7 +192,7 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .cfd-kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex-shrink:0;}
 @media (max-width:1200px){.cfd-kpi-strip{grid-template-columns:repeat(3,1fr);}}
 @media (max-width:700px){.cfd-kpi-strip{grid-template-columns:repeat(2,1fr);}}
-.cfd-kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;display:flex;gap:8px;align-items:flex-start;}
+.cfd-kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 12px;display:flex;gap:8px;align-items:center;}
 .cfd-kpi-icon{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;}
 .cfd-kpi-label{font-size:9px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:0.5px;text-transform:uppercase;}
 .cfd-kpi-value{font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--text);margin-top:1px;}
@@ -212,7 +212,7 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
    for shrink priority with no guaranteed winner — on a short viewport the
    ODC CLINs section could be squeezed to near-nothing instead of the
    flexible row giving up space first. */
-#screen-home.active{display:grid;grid-template-rows:auto auto 1fr auto auto auto;gap:10px;height:100%;min-height:0;}
+#screen-home.active{display:grid;grid-template-rows:auto auto 1fr auto auto auto;gap:8px;height:100%;min-height:0;}
 .cfd-main-row{min-height:0;align-items:stretch;overflow:hidden;}
 .cfd-section-fill{display:flex;flex-direction:column;height:100%;min-height:0;}
 .cfd-section-fill .cfd-section-body{flex:1;min-height:0;overflow-y:auto;}
@@ -240,10 +240,11 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 
 .cfd-odc-clins{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 @media (max-width:900px){.cfd-odc-clins{grid-template-columns:1fr;}}
-.cfd-odc-clin-card{border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center;}
-.cfd-odc-clin-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;}
-.cfd-odc-clin-sub{font-size:11px;color:var(--sub);margin-bottom:10px;}
-.cfd-odc-legend{display:flex;justify-content:center;gap:14px;font-size:10px;color:var(--sub);margin-top:8px;flex-wrap:wrap;}
+.cfd-odc-clin-card{border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:12px;text-align:left;}
+.cfd-odc-clin-info{flex:1;min-width:0;}
+.cfd-odc-clin-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cfd-odc-clin-sub{font-size:10px;color:var(--sub);margin-bottom:4px;}
+.cfd-odc-legend{display:flex;justify-content:flex-start;gap:10px;font-size:9px;color:var(--sub);flex-wrap:wrap;}
 .cfd-odc-legend span{display:inline-flex;align-items:center;gap:4px;}
 .cfd-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
 

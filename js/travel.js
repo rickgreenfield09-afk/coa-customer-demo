@@ -25,7 +25,14 @@ var travel = {
 };
 
 async function loadTravelScreen(){
-  travel.persona = currentPersonaSlug();
+  var newPersona = currentPersonaSlug();
+  if(newPersona !== travel.persona){
+    // Persona changed (e.g. via Switch Role) — cached employee/customer-user
+    // ids belonged to the PREVIOUS persona and must not be reused.
+    travel.employeeId = null;
+    travel.customerUserId = null;
+  }
+  travel.persona = newPersona;
   var bar = document.getElementById('travel-subtab-bar');
   var content = document.getElementById('travel-content');
 
@@ -38,8 +45,12 @@ async function loadTravelScreen(){
 
   if(travel.persona === 'employee' || travel.persona === 'supervisor'){
     if(!travel.employeeId){
-      var { data: emp } = await supabaseClient.from('demo_employees').select('id').eq('owner_profile_id', currentProfile.id).eq('persona_id', currentProfile.active_persona_id).limit(1);
+      var { data: emp, error: empErr } = await supabaseClient.from('demo_employees').select('id').eq('owner_profile_id', currentProfile.id).eq('persona_id', currentProfile.active_persona_id).limit(1);
+      if(empErr){ console.error('Could not look up your employee clone:', empErr); }
       travel.employeeId = emp && emp.length ? emp[0].id : null;
+      if(!travel.employeeId){
+        console.error('No demo_employees clone found for owner_profile_id=' + currentProfile.id + ' persona_id=' + currentProfile.active_persona_id);
+      }
     }
     var tabs = [{ id: 'estimates', label: 'My Estimates' }, { id: 'expenses', label: 'My Expenses' }];
     if(travel.persona === 'supervisor'){ tabs.push({ id: 'approvals', label: 'Approvals' }); }
@@ -96,6 +107,11 @@ async function loadMyEstimates(editId){
   var content = document.getElementById('travel-content');
   teEditingId = editId || null;
   teEditingRow = null;
+
+  if(!travel.employeeId){
+    content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">No employee record found</div><div class="placeholder-sub">Try switching roles and back, or refreshing the page.</div></div>';
+    return;
+  }
 
   try{
     if(teEditingId){
@@ -569,6 +585,11 @@ async function loadMyExpenses(editId){
   var content = document.getElementById('travel-content');
   texEditingId = editId || null;
   texEditingRow = null;
+
+  if(!travel.employeeId){
+    content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">No employee record found</div><div class="placeholder-sub">Try switching roles and back, or refreshing the page.</div></div>';
+    return;
+  }
 
   try{
     if(texEditingId){

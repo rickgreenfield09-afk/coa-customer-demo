@@ -92,10 +92,17 @@ async function showApp(session){
   if(currentProfile && currentProfile.active_persona_id){
     document.getElementById('switch-role-btn').style.display = '';
     document.getElementById('app-nav').style.display = 'flex';
+    updateNavVisibility();
     switchScreen('home');
   }else{
     await showRolePicker();
   }
+}
+
+// Travel isn't relevant to a Customer Viewer (no travel role at all).
+function updateNavVisibility(){
+  var travelBtn = document.getElementById('nav-btn-travel');
+  travelBtn.style.display = currentPersonaSlug() === 'customer_viewer' ? 'none' : '';
 }
 
 // ---------- Role picker ----------
@@ -142,6 +149,7 @@ async function selectPersona(personaId){
 
     document.getElementById('switch-role-btn').style.display = '';
     document.getElementById('app-nav').style.display = 'flex';
+    updateNavVisibility();
     switchScreen('home');
   }catch(e){
     errorEl.textContent = 'Could not select that role — try again.';
@@ -156,6 +164,7 @@ function switchScreen(name){
   document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
   document.getElementById('screen-' + name).classList.add('active');
   if(name === 'home' && typeof loadDashboard === 'function'){ loadDashboard(); }
+  if(name === 'travel' && typeof loadTravelScreen === 'function'){ loadTravelScreen(); }
   if(name === 'settings'){ renderThemeToggle(); }
 }
 

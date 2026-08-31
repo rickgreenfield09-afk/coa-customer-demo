@@ -53,7 +53,7 @@
     </header>
     <nav id="app-nav" style="display:none;">
       <button class="nav-btn active" data-screen="home" onclick="switchScreen('home')">Dashboard</button>
-      <button class="nav-btn" data-screen="travel" onclick="switchScreen('travel')">Travel</button>
+      <button class="nav-btn" id="nav-btn-travel" data-screen="travel" onclick="switchScreen('travel')">Travel</button>
       <button class="nav-btn" data-screen="settings" onclick="switchScreen('settings')">Settings</button>
     </nav>
     <main>
@@ -121,11 +121,9 @@
 
         <div id="cfd-edit-wrap" style="flex-shrink:0;"></div>
       </div>
-      <div class="screen" id="screen-travel">
-        <div class="placeholder-card">
-          <div class="placeholder-title">Travel</div>
-          <div class="placeholder-sub">Coming next session.</div>
-        </div>
+      <div class="screen" id="screen-travel" style="overflow-y:auto;display:block;">
+        <div id="travel-subtab-bar" class="travel-subtab-bar"></div>
+        <div id="travel-content"><div class="tk-empty">Loading...</div></div>
       </div>
       <div class="screen" id="screen-settings">
         <div class="tk-entry-card" style="max-width:480px;">
@@ -146,6 +144,7 @@
   <script src="js/env.js"></script>
   <script src="js/supabaseClient.js"></script>
   <script src="js/dashboard.js"></script>
+  <script src="js/travel.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

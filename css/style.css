@@ -122,6 +122,9 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .tk-status-pill.rejected{background:rgba(224,82,82,0.12);color:var(--red);}
 .tk-status-pill.cancelled{background:var(--raised);color:var(--muted);}
 .tk-status-pill.expensed{background:rgba(191,95,255,0.12);color:var(--purple);}
+.tk-status-pill.supervisor_approved{background:rgba(42,184,166,0.12);color:var(--teal);}
+.tk-status-pill.returned{background:rgba(191,95,255,0.12);color:var(--purple);}
+.tk-status-pill.denied{background:rgba(224,82,82,0.12);color:var(--red);}
 
 .danger-box{background:rgba(224,82,82,0.08);border:1px solid var(--red);border-radius:8px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px;}
 .danger-box-title{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;color:var(--red);margin-bottom:4px;}
@@ -257,6 +260,36 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .cfd-confidence-high{background:rgba(31,170,89,0.15);color:var(--cfd-green);}
 .cfd-confidence-medium{background:rgba(224,124,31,0.15);color:var(--cfd-orange);}
 .cfd-confidence-low{background:rgba(214,54,63,0.15);color:var(--cfd-red);}
+
+/* ---------- Travel Estimate/Expense forms (ported from the COA Employee
+   Portal's screen-travel-estimate.js / screen-travel-expense.js) ---------- */
+.profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;}
+.info-box{background:var(--raised);border-radius:6px;padding:14px;}
+.info-label{font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;}
+.info-val{font-size:14px;color:var(--text);}
+.profile-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;}
+.btn-save{padding:9px 18px;border-radius:6px;border:none;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;background:var(--teal);color:var(--void);transition:all 0.15s;}
+.btn-save:hover{background:#35d4c0;}
+.info-edit-input{width:100%;background:var(--surface);border:1px solid var(--teal);border-radius:4px;padding:6px 8px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;outline:none;}
+.resume-section{border-top:1px solid var(--border);padding-top:16px;margin-top:16px;}
+.resume-section-title{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;}
+.resume-cart-item{display:flex;align-items:center;justify-content:space-between;background:var(--raised);border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:13px;}
+.resume-cart-item a{color:var(--teal);}
+.btn-remove-row{background:none;border:none;color:var(--red);font-size:11px;font-family:'DM Mono',monospace;cursor:pointer;padding:2px 0;}
+.tk-pto-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end;margin-bottom:14px;}
+.tk-pto-form-grid .field-label{margin-bottom:6px;}
+.tk-pto-form-grid input.field-input,.tk-pto-form-grid select.field-input{margin-bottom:0;}
+.tk-pto-summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.tk-pto-stat-box{background:var(--raised);border-radius:6px;padding:16px;}
+.tk-pto-stat-label{font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;}
+.tk-pto-stat-val{font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--teal);}
+.tk-grid-table-wrap{overflow-x:auto;}
+.tk-grid-table{width:100%;border-collapse:collapse;}
+.tk-grid-table th{text-align:left;font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1px;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--border);}
+.tk-grid-table td{font-size:13px;color:var(--text);padding:8px 10px;border-bottom:1px solid var(--border);}
+.tk-now-btn{background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:11px;color:var(--teal);cursor:pointer;white-space:nowrap;flex-shrink:0;}
+.tk-now-btn:hover{border-color:var(--teal);}
+.travel-subtab-bar{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;}
 
 /* ---------- Print (Travel Estimate / dashboard export) ---------- */
 @media print{

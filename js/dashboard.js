@@ -393,7 +393,7 @@ function renderLaborClins(slinIds, asOfDate){
     var timePct = timeTotal ? Math.min(100, (timeElapsed / timeTotal) * 100) : 0;
     var barColor = pctFunded > 90 ? 'var(--cfd-red)' : (pctFunded > 70 ? 'var(--cfd-orange)' : 'var(--cfd-blue)');
 
-    return '<div class="cfd-labor-card">'
+    return '<div class="cfd-labor-card" onclick="openClinDetail(\'' + s.slin_id + '\')">'
       + '<div class="cfd-labor-main">'
       + '<div class="cfd-labor-title">' + escAttr(s.slin_code) + (s.option_year ? (' · ' + escAttr(s.option_year)) : '') + '</div>'
       + '<div class="cfd-labor-sub">' + escAttr(s.slin_description || '') + ' · ' + escAttr(s.contract_type || '') + '</div>'
@@ -433,9 +433,10 @@ function renderOdcTable(slinIds){
   wrap.innerHTML = '<table class="cfd-odc-table"><thead><tr><th>Description</th><th>SLIN</th><th>Reference</th><th>Amount</th><th>Status</th><th>Expected</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>'
     + open.map(function(o){
         var slin = dash.slins.find(function(s){ return s.slin_id === o.slin_id; });
-        return '<tr><td>' + escAttr(o.description) + '</td><td>' + escAttr(slin ? slin.slin_code : '') + '</td><td>' + escAttr(o.reference_number || '—') + '</td>'
+        return '<tr onclick="openOdcDetail(\'' + o.id + '\')">'
+          + '<td>' + escAttr(o.description) + '</td><td>' + escAttr(slin ? slin.slin_code : '') + '</td><td>' + escAttr(o.reference_number || '—') + '</td>'
           + '<td>' + money(o.committed_amount) + '</td><td><span class="tk-status-pill open">Open</span></td><td>' + (o.expected_date || '—') + '</td>'
-          + (canEdit ? ('<td><button class="btn-edit" style="padding:4px 10px;font-size:11px;" onclick="closeOdcCommitment(\'' + o.id + '\')">Close</button></td>') : '')
+          + (canEdit ? ('<td><button class="btn-edit" style="padding:4px 10px;font-size:11px;" onclick="event.stopPropagation();closeOdcCommitment(\'' + o.id + '\')">Close</button></td>') : '')
           + '</tr>';
       }).join('')
     + '</tbody><tfoot><tr><td colspan="3">Total Open Commitments</td><td>' + money(total) + '</td><td colspan="' + (canEdit ? 3 : 2) + '"></td></tr></tfoot></table>';
@@ -459,7 +460,7 @@ function renderOdcClins(slinIds, asOfDate){
       + '<div style="font-size:7px;color:var(--muted);text-transform:uppercase;">Actual+Cmt</div>'
       + '</div></div>';
 
-    return '<div class="cfd-odc-clin-card">'
+    return '<div class="cfd-odc-clin-card" onclick="openClinDetail(\'' + s.slin_id + '\')">'
       + gauge
       + '<div class="cfd-odc-clin-info">'
       + '<div class="cfd-odc-clin-title">' + escAttr(s.slin_code) + ' — ' + escAttr(s.slin_description || s.slin_category) + '</div>'
@@ -687,21 +688,24 @@ async function submitAddFundingMod(){
   }
 }
 
+// Actor (Supervisor -> demo_employees clone, Customer Admin -> customer_users
+// row) resolved via app.js's resolveOdcActor() — odc_commitments requires
+// exactly one of created_by_employee_id/created_by_customer_user_id set.
 async function submitAddOdc(){
   var errorEl = document.getElementById('edit-odc-error');
   var slinId = document.getElementById('edit-odc-slin').value;
   var description = document.getElementById('edit-odc-desc').value;
   var amount = Number(document.getElementById('edit-odc-amount').value || 0);
   if(!description || !amount){ errorEl.textContent = 'Description and amount are required.'; return; }
-  if(!currentProfile.active_customer_id){ errorEl.textContent = 'Select the Customer Admin role to add ODC commitments.'; return; }
   try{
-    var { data: cuRows, error: cuErr } = await supabaseClient.from('customer_users').select('id').eq('profile_id', currentProfile.id).limit(1);
-    if(cuErr){ throw cuErr; }
+    var actor = await resolveOdcActor();
+    if(!actor){ errorEl.textContent = 'Select the Supervisor or Customer Admin role to add ODC commitments.'; return; }
     var { error } = await supabaseClient.from('odc_commitments').insert({
       slin_id: slinId, description: description,
       reference_number: document.getElementById('edit-odc-ref').value || null,
       committed_amount: amount, status: 'open',
-      created_by_customer_user_id: cuRows[0].id
+      created_by_employee_id: actor.employee_id,
+      created_by_customer_user_id: actor.customer_user_id
     });
     if(error){ throw error; }
     dash.loaded = false;
@@ -712,20 +716,87 @@ async function submitAddOdc(){
   }
 }
 
-async function closeOdcCommitment(id){
-  var actual = window.prompt('Actual amount for this commitment?');
-  if(actual === null){ return; }
+// Single source of truth for closing an ODC commitment — called from both
+// the Dashboard's Open ODC Commitments table and the ODC Procurements
+// screen (js/odc.js). Uses the shared modal (app.js) instead of
+// window.prompt.
+function closeOdcCommitment(id){
+  var todayStr = new Date().toISOString().slice(0, 10);
+  var bodyHtml = '<div><label class="field-label">Actual Amount</label><input type="number" step="0.01" class="field-input" id="modal-odc-actual-amount"></div>'
+    + '<div><label class="field-label">Actual Date</label><input type="date" class="field-input" id="modal-odc-actual-date" value="' + todayStr + '"></div>'
+    + '<div class="login-error" id="modal-odc-close-error"></div>';
+  var footerHtml = '<button class="btn-cancel" onclick="closeModal()">Cancel</button>'
+    + '<button class="btn-save" onclick="confirmCloseOdcCommitment(\'' + id + '\')">Close Commitment</button>';
+  openModal('Close ODC Commitment', bodyHtml, footerHtml);
+}
+
+async function confirmCloseOdcCommitment(id){
+  var errorEl = document.getElementById('modal-odc-close-error');
+  var actual = document.getElementById('modal-odc-actual-amount').value;
+  var actualDate = document.getElementById('modal-odc-actual-date').value;
+  if(!actual){ errorEl.textContent = 'Actual amount is required.'; return; }
   try{
-    var { data: cuRows } = await supabaseClient.from('customer_users').select('id').eq('profile_id', currentProfile.id).limit(1);
+    var actor = await resolveOdcActor();
+    if(!actor){ errorEl.textContent = 'Select the Supervisor or Customer Admin role to close commitments.'; return; }
     var { error } = await supabaseClient.from('odc_commitments').update({
-      status: 'closed', actual_amount: Number(actual), actual_date: new Date().toISOString().slice(0, 10),
-      closed_by_customer_user_id: cuRows && cuRows[0] ? cuRows[0].id : null
+      status: 'closed', actual_amount: Number(actual), actual_date: actualDate || new Date().toISOString().slice(0, 10),
+      closed_by_employee_id: actor.employee_id,
+      closed_by_customer_user_id: actor.customer_user_id
     }).eq('id', id);
     if(error){ throw error; }
-    dash.loaded = false;
-    await loadDashboard();
+    closeModal();
+    if(document.getElementById('screen-home').classList.contains('active')){ dash.loaded = false; await loadDashboard(); }
+    if(typeof odcProc !== 'undefined' && document.getElementById('screen-odc').classList.contains('active')){ odcProc.loaded = false; await loadOdcScreen(); }
   }catch(e){
-    alert('Could not close the commitment — try again.');
+    errorEl.textContent = 'Could not close the commitment — try again.';
     console.error(e);
   }
+}
+
+// ---------- Drill-down popups (dashboard cards -> Contract Data / ODC
+// Procurements deep links) ----------
+
+function openClinDetail(slinId){
+  var s = dash.slins.find(function(x){ return x.slin_id === slinId; });
+  if(!s){ return; }
+  var node = dash.nodes.find(function(n){ return n.node_id === s.billing_node_id; });
+  var taskOrderNode = node && node.parent_node_id ? dash.nodes.find(function(n){ return n.node_id === node.parent_node_id; }) : null;
+  var latest = dash.funding.filter(function(f){ return f.slin_id === slinId; }).sort(function(a, b){ return a.mod_date < b.mod_date ? -1 : 1; }).pop();
+  var m = computeMetrics([slinId], dash.lastAsOfDate || new Date().toISOString().slice(0, 10));
+
+  var bodyHtml = '<div class="profile-grid">'
+    + travelReadOnlyField('SLIN', s.slin_code)
+    + travelReadOnlyField('Category', s.slin_category)
+    + travelReadOnlyField('Description', s.slin_description)
+    + travelReadOnlyField('Option Year', s.option_year)
+    + travelReadOnlyField('Period of Performance', formatDate(s.pop_start) + ' – ' + formatDate(s.pop_end))
+    + travelReadOnlyField('Status', s.status)
+    + travelReadOnlyField('Funded (latest mod)', money(m.funded))
+    + travelReadOnlyField('Actual', money(m.actual))
+    + travelReadOnlyField('Available', money(m.available))
+    + travelReadOnlyField('Last Funding Mod', latest ? (latest.mod_number || '—') + ' — ' + formatDate(latest.mod_date) : '—')
+    + '</div>';
+  var footerHtml = '<button class="btn-cancel" onclick="closeModal()">Close</button>'
+    + '<button class="btn-save" onclick="closeModal();switchScreen(\'burndown\');loadBurndownScreen(\'' + s.contract_id + '\',\'' + s.billing_node_id + '\');">Open in Contract Data &rarr;</button>';
+  openModal(escAttr(s.slin_code) + (taskOrderNode ? (' — ' + escAttr(taskOrderNode.label)) : ''), bodyHtml, footerHtml);
+}
+
+function openOdcDetail(id){
+  var o = dash.odc.find(function(x){ return x.id === id; });
+  if(!o){ return; }
+  var s = dash.slins.find(function(x){ return x.slin_id === o.slin_id; });
+
+  var bodyHtml = '<div class="profile-grid">'
+    + travelReadOnlyField('Description', o.description)
+    + travelReadOnlyField('SLIN', s ? s.slin_code : '—')
+    + travelReadOnlyField('Reference #', o.reference_number)
+    + travelReadOnlyField('Committed Amount', money(o.committed_amount))
+    + travelReadOnlyField('Status', o.status)
+    + travelReadOnlyField('Expected Date', formatDate(o.expected_date))
+    + travelReadOnlyField('Actual Amount', o.actual_amount != null ? money(o.actual_amount) : '—')
+    + travelReadOnlyField('Actual Date', formatDate(o.actual_date))
+    + '</div>';
+  var footerHtml = '<button class="btn-cancel" onclick="closeModal()">Close</button>'
+    + '<button class="btn-save" onclick="closeModal();switchScreen(\'odc\');loadOdcScreen(\'' + id + '\');">Open in ODC Procurements &rarr;</button>';
+  openModal(escAttr(o.description), bodyHtml, footerHtml);
 }

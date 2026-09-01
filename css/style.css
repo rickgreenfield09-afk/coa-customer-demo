@@ -145,21 +145,6 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .dash-card-empty{font-size:13px;color:var(--sub);padding:8px 0;}
 @media (max-width:900px){.dash-grid{grid-template-columns:1fr;}.dash-grid-2col{grid-template-columns:1fr;}.dash-header-meta{margin-left:0;}}
 
-/* Tree + detail split — used for the SLIN/billing-node tree */
-.bd-layout{display:flex;gap:20px;align-items:flex-start;}
-.bd-tree-panel{flex:0 0 340px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;max-height:70vh;overflow-y:auto;}
-.bd-detail-panel-col{flex:1;min-width:0;}
-@media (max-width:900px){.bd-layout{flex-direction:column;}.bd-tree-panel{flex:1 1 auto;max-height:none;width:100%;}}
-.bd-tree{display:flex;flex-direction:column;}
-.bd-tree-row{display:flex;align-items:center;gap:6px;padding-top:6px;padding-bottom:6px;border-radius:4px;cursor:default;}
-.bd-tree-row.selected{background:rgba(42,184,166,0.1);}
-.bd-tree-caret{width:14px;flex-shrink:0;color:var(--muted);cursor:pointer;font-size:11px;}
-.bd-tree-label{flex:1;font-size:13px;color:var(--text);cursor:pointer;}
-.bd-tree-row.selected .bd-tree-label{color:var(--teal);font-weight:600;}
-.bd-tree-type-tag{font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;}
-.bd-ledger{display:flex;flex-direction:column;gap:8px;}
-.bd-ledger-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--raised);border-radius:6px;padding:10px 14px;}
-
 /* ---------- Appearance toggle (Settings screen) ---------- */
 .theme-toggle-wrap{display:flex;align-items:center;gap:10px;}
 .theme-toggle-label{font-size:11px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1px;text-transform:uppercase;}
@@ -222,8 +207,9 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .cfd-right-col{display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;}
 .cfd-right-col .cfd-section{display:flex;flex-direction:column;min-height:0;}
 
-.cfd-labor-card{border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+.cfd-labor-card{border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;cursor:pointer;}
 .cfd-labor-card:last-child{margin-bottom:0;}
+.cfd-labor-card:hover{border-color:var(--teal);}
 .cfd-labor-main{flex:1;min-width:200px;}
 .cfd-labor-title{font-size:13px;font-weight:600;color:var(--text);}
 .cfd-labor-sub{font-size:10px;color:var(--sub);margin-top:1px;}
@@ -239,11 +225,14 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .cfd-odc-table{width:100%;border-collapse:collapse;font-size:12px;}
 .cfd-odc-table th{text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;padding:6px 8px;border-bottom:1px solid var(--border);}
 .cfd-odc-table td{padding:8px;border-bottom:1px solid var(--border);color:var(--text);}
+.cfd-odc-table tbody tr{cursor:pointer;}
+.cfd-odc-table tbody tr:hover{background:var(--raised);}
 .cfd-odc-table tfoot td{font-weight:700;border-top:2px solid var(--border);border-bottom:none;}
 
 .cfd-odc-clins{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 @media (max-width:900px){.cfd-odc-clins{grid-template-columns:1fr;}}
-.cfd-odc-clin-card{border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:12px;text-align:left;}
+.cfd-odc-clin-card{border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:12px;text-align:left;cursor:pointer;}
+.cfd-odc-clin-card:hover{border-color:var(--teal);}
 .cfd-odc-clin-info{flex:1;min-width:0;}
 .cfd-odc-clin-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .cfd-odc-clin-sub{font-size:10px;color:var(--sub);margin-bottom:4px;}
@@ -302,3 +291,47 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .print-page .print-sub{font-size:12px;color:#555;margin-bottom:20px;}
 .print-page table{width:100%;border-collapse:collapse;margin-bottom:16px;}
 .print-page th,.print-page td{text-align:left;padding:6px 8px;border-bottom:1px solid #ccc;font-size:13px;}
+
+/* ---------- Contract Data (ported Burndown screens, js/burndown.js) —
+   Customers/Contracts CRUD list + the billing_nodes tree/detail split
+   view + SLIN Table + Rates. Copied from COA-pilot-portal's styles.css
+   (.bd-* block) — reuses .tk-entry-card/.tk-section-title/.tk-status-pill/
+   .field-input/.asset-form-grid/.btn-edit/.btn-cancel/.btn already defined
+   above rather than duplicating them; only the genuinely new row/tree/
+   ledger shapes are defined here. ---------- */
+.bd-subscreen{display:none;}
+.bd-subscreen.active{display:block;}
+.bd-row-card{cursor:default;}
+.bd-row-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;}
+.bd-row-title{font-size:14px;font-weight:600;color:var(--text);}
+.bd-row-sub{font-size:12px;color:var(--sub);margin-top:2px;}
+.bd-row-expand{display:none;}
+.bd-row-expand.open{display:block;margin-top:16px;}
+.bd-detail-inline{border-top:1px solid var(--border);padding-top:16px;}
+.bd-add-form{background:var(--raised);border-radius:6px;padding:14px;margin-top:10px;}
+.bd-nested-section{border-top:1px solid var(--border);margin-top:16px;padding-top:16px;}
+.bd-row-card-nested{background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-bottom:8px;}
+.bd-status-pill{font-size:11px;font-family:'DM Mono',monospace;padding:3px 10px;border-radius:10px;text-transform:uppercase;letter-spacing:0.5px;}
+.bd-pill-active{background:rgba(42,184,166,0.14);color:var(--teal);}
+.bd-pill-muted{background:var(--raised);color:var(--muted);}
+.bd-inline-hint{font-size:10px;color:var(--muted);text-transform:none;letter-spacing:0;font-family:'DM Sans',sans-serif;margin-left:6px;}
+
+.bd-layout{display:flex;gap:20px;align-items:flex-start;}
+.bd-tree-panel{flex:0 0 340px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;max-height:70vh;overflow-y:auto;}
+.bd-tree-panel:empty{display:none;border:none;padding:0;}
+.bd-detail-panel-col{flex:1;min-width:0;}
+@media (max-width:900px){.bd-layout{flex-direction:column;}.bd-tree-panel{flex:1 1 auto;max-height:none;width:100%;}}
+
+.bd-tree{display:flex;flex-direction:column;}
+.bd-tree-row{display:flex;align-items:center;gap:6px;padding-top:6px;padding-bottom:6px;border-radius:4px;cursor:default;}
+.bd-tree-row.selected{background:rgba(42,184,166,0.1);}
+.bd-tree-caret{width:14px;flex-shrink:0;color:var(--muted);cursor:pointer;font-size:11px;}
+.bd-tree-label{flex:1;font-size:13px;color:var(--text);cursor:pointer;}
+.bd-tree-row.selected .bd-tree-label{color:var(--teal);font-weight:600;}
+.bd-tree-type-tag{font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;}
+
+.bd-ledger{display:flex;flex-direction:column;gap:8px;}
+.bd-ledger-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--raised);border-radius:6px;padding:10px 14px;}
+
+/* ODC Procurements screen (js/odc.js) — deep-link row highlight */
+.odc-row-highlight{background:rgba(42,184,166,0.18) !important;transition:background 1.5s ease;}

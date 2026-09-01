@@ -54,6 +54,8 @@
     <nav id="app-nav" style="display:none;">
       <button class="nav-btn active" data-screen="home" onclick="switchScreen('home')">Dashboard</button>
       <button class="nav-btn" id="nav-btn-travel" data-screen="travel" onclick="switchScreen('travel')">Travel</button>
+      <button class="nav-btn" id="nav-btn-burndown" data-screen="burndown" onclick="switchScreen('burndown')">Contract Data</button>
+      <button class="nav-btn" id="nav-btn-odc" data-screen="odc" onclick="switchScreen('odc')">ODC Procurements</button>
       <button class="nav-btn" data-screen="settings" onclick="switchScreen('settings')">Settings</button>
     </nav>
     <main>
@@ -137,7 +139,57 @@
           </div>
         </div>
       </div>
+      <div class="screen" id="screen-burndown">
+        <div class="subtab-bar">
+          <button class="subtab-btn active" data-bdsubtab="customers" onclick="switchBurndownSubtab('customers')">Customers &amp; Contracts</button>
+          <button class="subtab-btn" data-bdsubtab="tree" onclick="switchBurndownSubtab('tree')">Billing Tree</button>
+          <button class="subtab-btn" data-bdsubtab="slintable" onclick="switchBurndownSubtab('slintable')">SLIN Table</button>
+          <button class="subtab-btn" data-bdsubtab="rates" onclick="switchBurndownSubtab('rates')">Rates</button>
+        </div>
+        <div class="bd-subscreen active" id="bd-customers">
+          <div id="bd-customers-list"><div class="tk-empty">Loading...</div></div>
+        </div>
+        <div class="bd-subscreen" id="bd-tree">
+          <div id="bd-tree-contract-picker" style="margin-bottom:16px;"></div>
+          <div class="bd-layout">
+            <div class="bd-tree-panel" id="bd-tree-panel"></div>
+            <div class="bd-detail-panel-col" id="bd-detail-panel"></div>
+          </div>
+        </div>
+        <div class="bd-subscreen" id="bd-slintable">
+          <div id="bd-st-contract-picker" style="margin-bottom:16px;"></div>
+          <div id="bd-st-existing-wrap"></div>
+          <div class="tk-entry-card" style="margin-top:20px;">
+            <div class="tk-section-title">Add New SLINs</div>
+            <div id="bd-st-bulk-wrap"></div>
+          </div>
+        </div>
+        <div class="bd-subscreen" id="bd-rates">
+          <div class="tk-entry-card" style="margin-bottom:20px;">
+            <div class="tk-section-title">Labor Categories</div>
+            <div id="bd-laborcat-list"><div class="tk-empty">Loading...</div></div>
+          </div>
+          <div class="tk-entry-card">
+            <div class="tk-section-title">Employee Rates</div>
+            <div id="bd-rates-employee-picker" style="margin-bottom:16px;"></div>
+            <div id="bd-rates-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="screen" id="screen-odc">
+        <div id="odc-content"><div class="tk-empty">Loading...</div></div>
+      </div>
     </main>
+  </div>
+
+  <!-- Shared modal (app.js openModal/closeModal) — used by the Dashboard
+       drill-down popups and the ODC "Close Commitment" flow. -->
+  <div class="modal-overlay" id="app-modal" onclick="if(event.target===this){closeModal();}">
+    <div class="modal-box">
+      <div class="modal-title"></div>
+      <div class="modal-text"></div>
+      <div class="modal-actions"></div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -145,6 +197,8 @@
   <script src="js/supabaseClient.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/travel.js"></script>
+  <script src="js/burndown.js"></script>
+  <script src="js/odc.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

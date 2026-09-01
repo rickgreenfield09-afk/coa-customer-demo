@@ -16,6 +16,31 @@ function currentPersonaSlug(){
 function isCustomerAdmin(){
   return currentProfile && (currentProfile.is_platform_admin || currentPersonaSlug() === 'customer_admin');
 }
+function isSupervisor(){
+  return currentPersonaSlug() === 'supervisor';
+}
+
+// Resolves the demo_employees / customer_users id that should be stamped as
+// the actor on an odc_commitments insert/close, based on the caller's
+// current persona — Supervisor writes as their own demo_employees clone,
+// Customer Admin writes as their customer_users membership row. Returns
+// null if neither applies (e.g. platform admin with no persona selected —
+// odc_commitments requires exactly one of the two actor columns, so there's
+// no valid write path for that case here).
+async function resolveOdcActor(){
+  var slug = currentPersonaSlug();
+  if(slug === 'supervisor'){
+    var { data: emp, error } = await supabaseClient.from('demo_employees').select('id').eq('owner_profile_id', currentProfile.id).eq('persona_id', currentProfile.active_persona_id).limit(1);
+    if(error){ console.error(error); return null; }
+    return (emp && emp.length) ? { employee_id: emp[0].id, customer_user_id: null } : null;
+  }
+  if(slug === 'customer_admin'){
+    var { data: cu, error: cuErr } = await supabaseClient.from('customer_users').select('id').eq('profile_id', currentProfile.id).limit(1);
+    if(cuErr){ console.error(cuErr); return null; }
+    return (cu && cu.length) ? { employee_id: null, customer_user_id: cu[0].id } : null;
+  }
+  return null;
+}
 
 async function ensurePersonasLoaded(){
   if(currentPersonas.length){ return; }
@@ -100,9 +125,18 @@ async function showApp(session){
 }
 
 // Travel isn't relevant to a Customer Viewer (no travel role at all).
+// Contract Data (ported Burndown screens) and ODC Procurements are gated
+// to Supervisor / Customer Admin — the personas playing "COA staff" /
+// "the customer" respectively (see migration 0010).
 function updateNavVisibility(){
   var travelBtn = document.getElementById('nav-btn-travel');
   travelBtn.style.display = currentPersonaSlug() === 'customer_viewer' ? 'none' : '';
+
+  var showAdminScreens = isCustomerAdmin() || isSupervisor();
+  var burndownBtn = document.getElementById('nav-btn-burndown');
+  if(burndownBtn){ burndownBtn.style.display = showAdminScreens ? '' : 'none'; }
+  var odcBtn = document.getElementById('nav-btn-odc');
+  if(odcBtn){ odcBtn.style.display = showAdminScreens ? '' : 'none'; }
 }
 
 // ---------- Role picker ----------
@@ -165,7 +199,21 @@ function switchScreen(name){
   document.getElementById('screen-' + name).classList.add('active');
   if(name === 'home' && typeof loadDashboard === 'function'){ loadDashboard(); }
   if(name === 'travel' && typeof loadTravelScreen === 'function'){ loadTravelScreen(); }
+  if(name === 'burndown' && typeof loadBurndownScreen === 'function'){ loadBurndownScreen(); }
+  if(name === 'odc' && typeof loadOdcScreen === 'function'){ loadOdcScreen(); }
   if(name === 'settings'){ renderThemeToggle(); }
+}
+
+// ---------- Shared modal (used by the Dashboard drill-down popups and the
+// ODC Procurements "Close Commitment" flow) ----------
+function openModal(titleHtml, bodyHtml, footerHtml){
+  document.querySelector('#app-modal .modal-title').innerHTML = titleHtml;
+  document.querySelector('#app-modal .modal-text').innerHTML = bodyHtml;
+  document.querySelector('#app-modal .modal-actions').innerHTML = footerHtml || '';
+  document.getElementById('app-modal').classList.add('active');
+}
+function closeModal(){
+  document.getElementById('app-modal').classList.remove('active');
 }
 
 // ---------- Appearance (light/dark theme, Settings screen) ----------

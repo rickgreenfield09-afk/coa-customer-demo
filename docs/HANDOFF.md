@@ -15,7 +15,10 @@ one tiny script that injects env vars at deploy time.
 ## Live services — everything below is actually deployed and working
 
 - **App:** https://coa-customer-demo.vercel.app
-- **GitHub:** https://github.com/rickgreenfield09-afk/coa-customer-demo (private repo).
+- **GitHub:** https://github.com/rickgreenfield09-afk/coa-customer-demo (public repo
+  as of 2026-09-01 — switched from private since there's no live/real data in this
+  demo app; this also sidesteps a separate class of Vercel deploy blocks tied to
+  private-repo collaborator recognition).
   Commits must be authored as `rickgreenfield09-afk <278198456+rickgreenfield09-afk@users.noreply.github.com>`
   — Vercel's Hobby plan blocks deploys from a commit author it doesn't recognize as a
   collaborator (learned this the hard way; the fix is that exact author string).

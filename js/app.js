@@ -262,7 +262,14 @@ function formatDate(d){
 
 supabaseClient.auth.onAuthStateChange(function(event, session){
   if(session && session.user){
-    showApp(session);
+    // Supabase fires TOKEN_REFRESHED (and re-emits the same session) when a
+    // background tab regains focus — only run the full bootstrap (which
+    // resets the screen router to Dashboard) on an actual sign-in, or if we
+    // haven't bootstrapped yet. Otherwise leave whatever screen/form is open
+    // alone; the client already refreshed its session silently.
+    if(event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || !currentProfile){
+      showApp(session);
+    }
   }else if(event === 'SIGNED_OUT'){
     showLogin();
   }

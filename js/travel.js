@@ -102,6 +102,7 @@ function slinOptionsHtml(selected){
 
 var teEditingId = null;
 var teEditingRow = null;
+var teLodgingQuotes = [];
 
 async function loadMyEstimates(editId){
   var content = document.getElementById('travel-content');
@@ -127,6 +128,7 @@ async function loadMyEstimates(editId){
 
     content.innerHTML = teFormHtml(teEditingRow) + '<div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
     if(teEditingRow){ tePrefillForm(teEditingRow); }
+    await teLoadLodgingQuotes();
     teRecalc();
   }catch(e){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">Couldn\'t load travel estimates</div><div class="placeholder-sub">Try refreshing the page.</div></div>';
@@ -137,17 +139,31 @@ async function loadMyEstimates(editId){
 function teFormHtml(row){
   return '<div class="tk-entry-card">'
     + '<div class="tk-section-title">' + (row ? 'Edit Draft Travel Estimate' : 'New Travel Estimate') + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-destination">Destination / Event</label><input class="field-input" id="te-destination" placeholder="City, State / Event name"></div>'
-    + '<div><label class="field-label" for="te-slin">ODC / Travel SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
-    + '<div><label class="field-label" for="te-trainers">Number of Trainers</label><input type="number" min="1" step="1" class="field-input" id="te-trainers" value="1" oninput="teRecalc()"></div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 100px 140px 140px;">'
+    + '<div><label class="field-label" for="te-destination">Destination (City, State)</label><input class="field-input" id="te-destination" placeholder="City, ST"></div>'
+    + '<div><label class="field-label" for="te-event-name">Event Name</label><input class="field-input" id="te-event-name" placeholder="Event name"></div>'
+    + '<div><label class="field-label" for="te-trainers">Trainers</label><input type="number" min="1" step="1" class="field-input" id="te-trainers" value="1" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-leave-date">Leave Date</label><input type="date" class="field-input" id="te-leave-date" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-return-date">Return Date</label><input type="date" class="field-input" id="te-return-date" oninput="teRecalc()"></div>'
     + '</div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:220px auto;">'
+    + '<div><label class="field-label" for="te-slin">ODC / Travel SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
+    + '<div></div>'
+    + '</div>'
     + '<div class="resume-section"><div class="resume-section-title">Per Diem</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-lodging-rate">Lodging Rate (per night)</label><input type="number" step="0.01" class="field-input" id="te-lodging-rate" value="0" oninput="teRecalc()"></div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:180px 180px auto;">'
+    + '<div><label class="field-label" for="te-gsa-lodging-rate">GSA Lodging Rate (per night)</label><input type="number" step="0.01" class="field-input" id="te-gsa-lodging-rate" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-meals-rate">Meals (M&amp;IE) Rate (per day)</label><input type="number" step="0.01" class="field-input" id="te-meals-rate" value="0" oninput="teRecalc()"></div>'
+    + '<div style="display:flex;align-items:flex-end;"><button type="button" class="btn-cancel" id="te-gsa-lookup-btn" onclick="teLookupGsaRates()">Look Up GSA Rates</button></div>'
+    + '</div>'
+    + '<div class="login-error" id="te-gsa-lookup-error" style="text-align:left;margin-top:-10px;"></div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:180px auto;">'
+    + '<div><label class="field-label" for="te-lodging-cost">Lodging Cost (per night, requested)</label><input type="number" step="0.01" class="field-input" id="te-lodging-cost" value="0" oninput="teRecalc()"></div>'
+    + '<div></div>'
+    + '</div>'
+    + '<div class="warning-box" id="te-lodging-warning" style="display:none;">'
+    + '<div><div class="warning-box-title">Lodging cost exceeds GSA rate</div><div class="warning-box-text" id="te-lodging-warning-text"></div>'
+    + '<button type="button" class="btn-edit" style="margin-top:8px;" id="te-lodging-quotes-btn" onclick="teOpenLodgingQuotesModal()">Upload Comparison Quotes</button></div>'
     + '</div>'
     + '<div class="profile-grid" style="margin-top:4px;">'
     + '<div class="info-box"><div class="info-label">Nights</div><div class="info-val" id="te-calc-nights">0</div></div>'
@@ -155,21 +171,23 @@ function teFormHtml(row){
     + '<div class="info-box"><div class="info-label">Per Diem Meals Total</div><div class="info-val" id="te-calc-perdiem">$0.00</div></div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Other Direct Costs</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 180px 120px 220px 120px;">'
     + '<div><label class="field-label" for="te-airfare">Airfare (avg)</label><input type="number" step="0.01" class="field-input" id="te-airfare" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-parking-transport">Airport Parking / Transport</label><input type="number" step="0.01" class="field-input" id="te-parking-transport" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-baggage">Baggage</label><input type="number" step="0.01" class="field-input" id="te-baggage" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-rental-car">Rental Car / Gas / Parking / Tolls</label><input type="number" step="0.01" class="field-input" id="te-rental-car" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-mileage">Mileage</label><input type="number" step="0.01" class="field-input" id="te-mileage" value="0" oninput="teRecalc()"></div>'
     + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px auto;">'
     + '<div><label class="field-label" for="te-shipping-to">Shipping (to)</label><input type="number" step="0.01" class="field-input" id="te-shipping-to" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-shipping-back">Shipping (back)</label><input type="number" step="0.01" class="field-input" id="te-shipping-back" value="0" oninput="teRecalc()"></div>'
+    + '<div></div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">EWW (Extended Work Week)</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:160px 200px auto;">'
     + '<div><label class="field-label" for="te-eww-rate">EWW Rate (per hour)</label><input type="number" step="0.01" class="field-input" id="te-eww-rate" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-eww-hours">EWW Hours per Trainer</label><input type="number" step="0.01" class="field-input" id="te-eww-hours" value="0" oninput="teRecalc()"></div>'
+    + '<div></div>'
     + '</div></div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
     + '<div class="tk-pto-summary-row">'
@@ -189,11 +207,13 @@ function teFormHtml(row){
 
 function tePrefillForm(row){
   document.getElementById('te-destination').value = row.destination_event || '';
+  document.getElementById('te-event-name').value = row.event_name || '';
   document.getElementById('te-slin').value = row.slin_id || '';
   document.getElementById('te-trainers').value = row.number_of_trainers || 1;
   document.getElementById('te-leave-date').value = row.leave_date || '';
   document.getElementById('te-return-date').value = row.return_date || '';
-  document.getElementById('te-lodging-rate').value = row.per_diem_lodging_rate || 0;
+  document.getElementById('te-gsa-lodging-rate').value = row.per_diem_lodging_rate || 0;
+  document.getElementById('te-lodging-cost').value = row.lodging_cost_per_night || 0;
   document.getElementById('te-meals-rate').value = row.per_diem_meals_rate || 0;
   document.getElementById('te-airfare').value = row.airfare_avg || 0;
   document.getElementById('te-parking-transport').value = row.airport_parking_transport || 0;
@@ -219,7 +239,7 @@ function teCalc(inputs){
   var fullDays = Math.max(nights - 1, 0);
   var fullDaysCost = fullDays * inputs.mealsRate;
   var perDiemMealsTotal = travelDaysCost + fullDaysCost;
-  var hotelTotal = nights * inputs.lodgingRate;
+  var hotelTotal = nights * inputs.lodgingCost;
 
   var perTravelerMarkupBucket = hotelTotal + inputs.airfare + inputs.parkingTransport + inputs.baggage;
   var tripLevelBucket = inputs.rentalCar + inputs.mileage + inputs.shippingTo + inputs.shippingBack;
@@ -239,7 +259,8 @@ function teReadFormInputs(){
     leaveDate: document.getElementById('te-leave-date').value,
     returnDate: document.getElementById('te-return-date').value,
     trainers: parseInt(document.getElementById('te-trainers').value, 10) || 1,
-    lodgingRate: parseFloat(document.getElementById('te-lodging-rate').value) || 0,
+    lodgingRate: parseFloat(document.getElementById('te-gsa-lodging-rate').value) || 0,
+    lodgingCost: parseFloat(document.getElementById('te-lodging-cost').value) || 0,
     mealsRate: parseFloat(document.getElementById('te-meals-rate').value) || 0,
     airfare: parseFloat(document.getElementById('te-airfare').value) || 0,
     parkingTransport: parseFloat(document.getElementById('te-parking-transport').value) || 0,
@@ -253,8 +274,13 @@ function teReadFormInputs(){
   };
 }
 
+function teLodgingOverRate(inputs){
+  return inputs.lodgingCost > inputs.lodgingRate && inputs.lodgingRate > 0;
+}
+
 function teRecalc(){
-  var calc = teCalc(teReadFormInputs());
+  var inputs = teReadFormInputs();
+  var calc = teCalc(inputs);
   document.getElementById('te-calc-nights').textContent = calc.nights;
   document.getElementById('te-calc-fulldays').textContent = calc.fullDays;
   document.getElementById('te-calc-perdiem').textContent = '$' + calc.perDiemMealsTotal.toFixed(2);
@@ -262,11 +288,23 @@ function teRecalc(){
   document.getElementById('te-total-trip-lead').textContent = '$' + calc.tripLeadInternal.toFixed(2);
   document.getElementById('te-total-eww').textContent = '$' + calc.ewwTotal.toFixed(2);
   document.getElementById('te-total-grand').textContent = '$' + (calc.tripLeadInternal + calc.ewwTotal).toFixed(2);
+
+  var warningEl = document.getElementById('te-lodging-warning');
+  if(warningEl){
+    if(teLodgingOverRate(inputs)){
+      warningEl.style.display = '';
+      document.getElementById('te-lodging-warning-text').textContent =
+        'Lodging cost ($' + inputs.lodgingCost.toFixed(2) + ') exceeds the GSA rate ($' + inputs.lodgingRate.toFixed(2) + ') — 3 comparison quotes are required to submit.';
+      document.getElementById('te-lodging-quotes-btn').textContent = 'Upload Comparison Quotes (' + teLodgingQuotes.length + ' of 3)';
+    }else{
+      warningEl.style.display = 'none';
+    }
+  }
   return calc;
 }
 
 async function teRenderMyEstimatesTable(){
-  var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,leave_date,return_date,status,trip_lead_total,eww_total').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
+  var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,status,trip_lead_total,eww_total').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
   rows = rows || [];
   if(!rows.length){ return '<div class="tk-empty">No travel estimates yet.</div>'; }
   return '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Destination / Event</th><th>Dates</th><th>Status</th><th>Grand Total</th><th></th></tr></thead><tbody>'
@@ -275,7 +313,7 @@ async function teRenderMyEstimatesTable(){
         var action = r.status === 'draft'
           ? '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">Edit Draft</button>'
           : '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">View</button>';
-        return '<tr><td>' + escAttr(r.destination_event || '—') + '</td>'
+        return '<tr><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
           + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td>'
           + '<td><span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></td>'
           + '<td>$' + grand.toFixed(2) + '</td><td>' + action + '</td></tr>';
@@ -289,9 +327,11 @@ function renderTeReadOnlyDetail(r){
   var slin = travel.odcSlins.find(function(s){ return s.slin_id === r.slin_id; });
 
   wrap.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Travel Estimate — ' + escAttr(r.destination_event || '—') + ' <span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></div>'
+    + '<div class="tk-section-title">Travel Estimate — ' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + ' <span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></div>'
     + '<div class="placeholder-sub" style="margin-bottom:14px;">This estimate is ' + r.status.replace('_', ' ') + ' and can no longer be edited here.</div>'
     + '<div class="profile-grid">'
+    + travelReadOnlyField('Destination', r.destination_event)
+    + travelReadOnlyField('Event Name', r.event_name)
     + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : '—')
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
     + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
@@ -308,25 +348,33 @@ async function submitTravelEstimate(targetStatus){
   var errorEl = document.getElementById('te-form-error');
   errorEl.textContent = '';
   var destination = document.getElementById('te-destination').value.trim();
+  var eventName = document.getElementById('te-event-name').value.trim();
   var slinId = document.getElementById('te-slin').value;
   var inputs = teReadFormInputs();
 
   if(targetStatus === 'submitted'){
     if(!destination || !slinId || !inputs.leaveDate || !inputs.returnDate){
-      errorEl.textContent = 'Destination/Event, SLIN, and both dates are required to submit.';
+      errorEl.textContent = 'Destination, SLIN, and both dates are required to submit.';
       return;
     }
     if(new Date(inputs.returnDate) < new Date(inputs.leaveDate)){
       errorEl.textContent = 'Return date must be on or after leave date.';
       return;
     }
+    if(teLodgingOverRate(inputs)){
+      var quotesOk = teLodgingQuotes.length === 3 && teLodgingQuotes.every(function(q){ return q.average_daily_rate != null; });
+      if(!quotesOk){
+        errorEl.textContent = 'Lodging cost exceeds the GSA rate — upload 3 comparison quotes with rates entered before submitting.';
+        return;
+      }
+    }
   }
 
   var calc = teCalc(inputs);
   var body = {
-    destination_event: destination || null, slin_id: slinId || null,
+    destination_event: destination || null, event_name: eventName || null, slin_id: slinId || null,
     leave_date: inputs.leaveDate || null, return_date: inputs.returnDate || null,
-    number_of_trainers: inputs.trainers, per_diem_lodging_rate: inputs.lodgingRate, per_diem_meals_rate: inputs.mealsRate,
+    number_of_trainers: inputs.trainers, per_diem_lodging_rate: inputs.lodgingRate, lodging_cost_per_night: inputs.lodgingCost, per_diem_meals_rate: inputs.mealsRate,
     airfare_avg: inputs.airfare, airport_parking_transport: inputs.parkingTransport, baggage: inputs.baggage,
     rental_car_gas_parking_tolls: inputs.rentalCar, mileage: inputs.mileage,
     shipping_to: inputs.shippingTo, shipping_back: inputs.shippingBack,
@@ -363,6 +411,143 @@ async function submitTravelEstimate(targetStatus){
   }
 }
 
+// ---------- GSA per-diem lookup ----------
+
+async function teLookupGsaRates(){
+  var errorEl = document.getElementById('te-gsa-lookup-error');
+  var btn = document.getElementById('te-gsa-lookup-btn');
+  errorEl.textContent = '';
+  var destination = document.getElementById('te-destination').value.trim();
+  var lastComma = destination.lastIndexOf(',');
+  if(lastComma === -1){
+    errorEl.textContent = 'Enter destination as "City, ST" to look up GSA rates.';
+    return;
+  }
+  var city = destination.slice(0, lastComma).trim();
+  var state = destination.slice(lastComma + 1).trim();
+  if(!city || !state){
+    errorEl.textContent = 'Enter destination as "City, ST" to look up GSA rates.';
+    return;
+  }
+
+  var leaveDateVal = document.getElementById('te-leave-date').value;
+  var leaveDate = leaveDateVal ? new Date(leaveDateVal) : new Date();
+  var year = leaveDate.getFullYear();
+  var month = leaveDate.getMonth() + 1;
+
+  var originalLabel = btn.textContent;
+  btn.textContent = 'Looking up...';
+  btn.disabled = true;
+  try{
+    var { data, error } = await supabaseClient.functions.invoke('gsa-per-diem', { body: { city: city, state: state, year: year, month: month } });
+    if(error || (data && data.error)){
+      errorEl.textContent = (data && data.error) ? data.error : 'Couldn\'t look up GSA rates. Enter manually.';
+      console.error(error || (data && data.error));
+      return;
+    }
+    if(data.lodgingRate != null){ document.getElementById('te-gsa-lodging-rate').value = data.lodgingRate; }
+    if(data.mealsRate != null){ document.getElementById('te-meals-rate').value = data.mealsRate; }
+    teRecalc();
+  }catch(e){
+    errorEl.textContent = 'Couldn\'t look up GSA rates. Enter manually.';
+    console.error(e);
+  }finally{
+    btn.textContent = originalLabel;
+    btn.disabled = false;
+  }
+}
+
+// ---------- Lodging comparison quotes (required when cost > GSA rate) ----------
+
+async function teLoadLodgingQuotes(){
+  if(!teEditingId){ teLodgingQuotes = []; return; }
+  try{
+    var { data: rows } = await supabaseClient.from('travel_estimate_lodging_quotes').select('*').eq('estimate_id', teEditingId).order('uploaded_at');
+    teLodgingQuotes = rows || [];
+  }catch(e){
+    teLodgingQuotes = [];
+    console.error(e);
+  }
+}
+
+function teLodgingQuotesModalBody(){
+  var avgRates = teLodgingQuotes.filter(function(q){ return q.average_daily_rate != null; }).map(function(q){ return parseFloat(q.average_daily_rate); });
+  var avgLine = avgRates.length
+    ? '<div class="placeholder-sub" style="margin-top:10px;">Average of entered rates: $' + (avgRates.reduce(function(a, b){ return a + b; }, 0) / avgRates.length).toFixed(2) + '</div>'
+    : '';
+  var uploadHtml = teLodgingQuotes.length < 3
+    ? '<input type="file" id="te-lodging-quote-input" multiple onchange="teUploadLodgingQuotes(this.files)">'
+    : '<div class="placeholder-sub">3 quotes attached — remove none needed, this is the required maximum.</div>';
+  var listHtml = teLodgingQuotes.length
+    ? teLodgingQuotes.map(function(q){
+        return '<div class="resume-cart-item"><a href="' + q.file_url + '" target="_blank">' + escAttr(q.file_name || 'Quote') + '</a>'
+          + '<span><label class="field-label" style="display:inline;margin:0 6px 0 0;">Avg Daily Rate</label>'
+          + '<input type="number" step="0.01" style="width:100px;display:inline-block;" class="field-input" value="' + (q.average_daily_rate == null ? '' : q.average_daily_rate) + '" onchange="teUpdateLodgingQuoteRate(\'' + q.id + '\', this.value)"></span></div>';
+      }).join('')
+    : '<div class="tk-empty">No comparison quotes attached yet.</div>';
+  return '<div>' + listHtml + '</div>' + uploadHtml + '<div class="login-error" id="te-lodging-quote-error"></div>' + avgLine;
+}
+
+async function teOpenLodgingQuotesModal(){
+  if(!teEditingId){
+    openModal('Comparison Quotes', '<div class="placeholder-sub">Save as Draft first to attach comparison quotes.</div>', '<button class="btn-cancel" onclick="closeModal()">Close</button>');
+    return;
+  }
+  await teLoadLodgingQuotes();
+  openModal('Lodging Comparison Quotes', teLodgingQuotesModalBody(), '<button class="btn-cancel" onclick="teCloseLodgingQuotesModal()">Close</button>');
+  teRecalc();
+}
+
+function teCloseLodgingQuotesModal(){
+  closeModal();
+  teLoadLodgingQuotes().then(teRecalc);
+}
+
+async function teUploadLodgingQuotes(files){
+  if(!teEditingId || !files || !files.length){ return; }
+  var errorEl = document.getElementById('te-lodging-quote-error');
+  var remaining = 3 - teLodgingQuotes.length;
+  if(remaining <= 0){
+    if(errorEl){ errorEl.textContent = 'Maximum of 3 comparison quotes reached.'; }
+    return;
+  }
+  var toUpload = Array.prototype.slice.call(files, 0, remaining);
+  if(files.length > toUpload.length && errorEl){
+    errorEl.textContent = 'Only ' + toUpload.length + ' file(s) uploaded — maximum of 3 comparison quotes total.';
+  }
+  for(var i = 0; i < toUpload.length; i++){
+    var file = toUpload[i];
+    var path = teEditingId + '/' + Date.now() + '-' + file.name;
+    try{
+      var { error: upErr } = await supabaseClient.storage.from('travel-lodging-quotes').upload(path, file);
+      if(upErr){ throw upErr; }
+      var { data: pub } = supabaseClient.storage.from('travel-lodging-quotes').getPublicUrl(path);
+      var { error: insErr } = await supabaseClient.from('travel_estimate_lodging_quotes').insert({
+        estimate_id: teEditingId, file_url: pub.publicUrl, file_name: file.name, uploaded_by: travel.employeeId
+      });
+      if(insErr){ throw insErr; }
+    }catch(e){
+      if(errorEl){ errorEl.textContent = 'Couldn\'t upload ' + file.name + '. Try again.'; }
+      console.error(e);
+    }
+  }
+  await teLoadLodgingQuotes();
+  openModal('Lodging Comparison Quotes', teLodgingQuotesModalBody(), '<button class="btn-cancel" onclick="teCloseLodgingQuotesModal()">Close</button>');
+  teRecalc();
+}
+
+async function teUpdateLodgingQuoteRate(quoteId, value){
+  try{
+    var { error } = await supabaseClient.from('travel_estimate_lodging_quotes').update({ average_daily_rate: Number(value) }).eq('id', quoteId);
+    if(error){ throw error; }
+  }catch(e){
+    console.error(e);
+  }
+  await teLoadLodgingQuotes();
+  openModal('Lodging Comparison Quotes', teLodgingQuotesModalBody(), '<button class="btn-cancel" onclick="teCloseLodgingQuotesModal()">Close</button>');
+  teRecalc();
+}
+
 // ---------- Supervisor approvals + Customer Admin authorizations ----------
 
 async function loadApprovalsQueue(){
@@ -370,7 +555,7 @@ async function loadApprovalsQueue(){
   content.innerHTML = '<div class="tk-empty">Loading...</div>';
   try{
     var [{ data: pendingEst }, { data: pendingExp }] = await Promise.all([
-      supabaseClient.from('travel_estimates').select('id,destination_event,leave_date,return_date,trip_lead_total,eww_total,created_by').eq('status', 'submitted').order('created_at'),
+      supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,created_by').eq('status', 'submitted').order('created_at'),
       supabaseClient.from('travel_expenses').select('id,estimate_id,current_status,supervisor_status,actual_trip_lead_total,actual_eww_total,variance_total,created_by').eq('current_status', 'submitted').eq('supervisor_status', 'pending').order('created_at')
     ]);
     pendingEst = pendingEst || []; pendingExp = pendingExp || [];
@@ -383,7 +568,7 @@ async function loadApprovalsQueue(){
           ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Employee</th><th>Destination</th><th>Dates</th><th>Grand Total</th><th></th></tr></thead><tbody>'
             + pendingEst.map(function(r){
                 var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
-                return '<tr><td>' + escAttr(namesById[r.created_by] || '—') + '</td><td>' + escAttr(r.destination_event || '—') + '</td>'
+                return '<tr><td>' + escAttr(namesById[r.created_by] || '—') + '</td><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
                   + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td><td>$' + grand.toFixed(2) + '</td>'
                   + '<td><button class="tk-now-btn" type="button" onclick="openEstimateApproval(\'' + r.id + '\')">Review</button></td></tr>';
               }).join('') + '</tbody></table></div>'
@@ -434,7 +619,8 @@ async function openEstimateApproval(estimateId){
   detail.innerHTML = '<div class="tk-entry-card">'
     + '<div class="tk-section-title">Travel Estimate — ' + escAttr(names[r.created_by] || '—') + '</div>'
     + '<div class="profile-grid">'
-    + travelReadOnlyField('Destination / Event', r.destination_event)
+    + travelReadOnlyField('Destination', r.destination_event)
+    + travelReadOnlyField('Event Name', r.event_name)
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
     + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
     + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.trip_lead_total) || 0).toFixed(2))
@@ -487,7 +673,7 @@ async function loadAuthorizationsQueue(){
   var content = document.getElementById('travel-content');
   content.innerHTML = '<div class="tk-empty">Loading...</div>';
   try{
-    var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,leave_date,return_date,trip_lead_total,eww_total,created_by,slin_id').eq('status', 'supervisor_approved').order('created_at');
+    var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,created_by,slin_id').eq('status', 'supervisor_approved').order('created_at');
     rows = rows || [];
     var scoped = [];
     for(var i = 0; i < rows.length; i++){
@@ -501,7 +687,7 @@ async function loadAuthorizationsQueue(){
           ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Employee</th><th>Destination</th><th>Dates</th><th>Grand Total</th><th></th></tr></thead><tbody>'
             + scoped.map(function(r){
                 var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
-                return '<tr><td>' + escAttr(names[r.created_by] || '—') + '</td><td>' + escAttr(r.destination_event || '—') + '</td>'
+                return '<tr><td>' + escAttr(names[r.created_by] || '—') + '</td><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
                   + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td><td>$' + grand.toFixed(2) + '</td>'
                   + '<td><button class="tk-now-btn" type="button" onclick="openAuthorizationReview(\'' + r.id + '\')">Review</button></td></tr>';
               }).join('') + '</tbody></table></div>'
@@ -526,7 +712,8 @@ async function openAuthorizationReview(estimateId){
     + '<div class="tk-section-title">Authorize Travel — ' + escAttr(names[r.created_by] || '—') + '</div>'
     + '<div class="placeholder-sub" style="margin-bottom:14px;">Already approved internally by the Supervisor. Your authorization is required before this trip can proceed and be expensed.</div>'
     + '<div class="profile-grid">'
-    + travelReadOnlyField('Destination / Event', r.destination_event)
+    + travelReadOnlyField('Destination', r.destination_event)
+    + travelReadOnlyField('Event Name', r.event_name)
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
     + travelReadOnlyField('Grand Total', '$' + grand.toFixed(2))
     + '</div>'
@@ -593,7 +780,7 @@ async function loadMyExpenses(editId){
 
   try{
     if(texEditingId){
-      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer)').eq('id', texEditingId).limit(1);
+      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer)').eq('id', texEditingId).limit(1);
       if(rows && rows.length){ texEditingRow = rows[0]; }
     }
 
@@ -604,7 +791,7 @@ async function loadMyExpenses(editId){
     }
 
     if(!texEditingRow){
-      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer').eq('created_by', travel.employeeId).eq('status', 'approved');
+      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer').eq('created_by', travel.employeeId).eq('status', 'approved');
       var { data: existing } = await supabaseClient.from('travel_expenses').select('estimate_id').eq('created_by', travel.employeeId);
       var takenIds = (existing || []).map(function(r){ return r.estimate_id; });
       texAvailableEstimates = (approved || []).filter(function(e){ return takenIds.indexOf(e.id) === -1; });
@@ -633,10 +820,11 @@ function texFormHtml(row){
     ? (texAvailableEstimates.length
         ? '<div class="tk-pto-form-grid" style="grid-template-columns:1fr;"><div><label class="field-label" for="tex-estimate-select">Authorized Estimate</label>'
           + '<select class="field-input" id="tex-estimate-select" onchange="texEstimateSelected()"><option value="">— Select an authorized estimate —</option>'
-          + texAvailableEstimates.map(function(e){ return '<option value="' + e.id + '">' + escAttr(e.destination_event || '—') + ' (' + formatDate(e.leave_date) + ' – ' + formatDate(e.return_date) + ')</option>'; }).join('')
+          + texAvailableEstimates.map(function(e){ return '<option value="' + e.id + '">' + escAttr(e.destination_event || '—') + (e.event_name ? ' — ' + escAttr(e.event_name) : '') + ' (' + formatDate(e.leave_date) + ' – ' + formatDate(e.return_date) + ')</option>'; }).join('')
           + '</select></div></div>'
         : '<div class="placeholder-sub" style="margin-bottom:14px;">No authorized estimates available to expense yet — an estimate must be Supervisor-approved and Customer-authorized first.</div>')
-    : '<div class="profile-grid">' + travelReadOnlyField('Destination / Event', row.travel_estimates ? row.travel_estimates.destination_event : '—')
+    : '<div class="profile-grid">' + travelReadOnlyField('Destination', row.travel_estimates ? row.travel_estimates.destination_event : '—')
+      + travelReadOnlyField('Event Name', row.travel_estimates ? row.travel_estimates.event_name : '—')
       + travelReadOnlyField('Estimated Grand Total', '$' + ((parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0) + (parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0)).toFixed(2)) + '</div>';
 
   return '<div class="tk-entry-card">'
@@ -778,7 +966,7 @@ function texRecalc(){
 }
 
 async function texRenderMyReportsTable(){
-  var { data: rows } = await supabaseClient.from('travel_expenses').select('id,current_status,actual_trip_lead_total,actual_eww_total,variance_total,travel_estimates(destination_event,leave_date,return_date)').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
+  var { data: rows } = await supabaseClient.from('travel_expenses').select('id,current_status,actual_trip_lead_total,actual_eww_total,variance_total,travel_estimates(destination_event,event_name,leave_date,return_date)').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
   rows = rows || [];
   if(!rows.length){ return '<div class="tk-empty">No expense reports yet.</div>'; }
   return '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Destination / Event</th><th>Dates</th><th>Status</th><th>Actual Grand Total</th><th>Variance</th><th></th></tr></thead><tbody>'
@@ -789,7 +977,7 @@ async function texRenderMyReportsTable(){
         var action = r.current_status === 'draft'
           ? '<button class="tk-now-btn" type="button" onclick="loadMyExpenses(\'' + r.id + '\')">Edit Draft</button>'
           : '<button class="tk-now-btn" type="button" onclick="loadMyExpenses(\'' + r.id + '\')">View</button>';
-        return '<tr><td>' + escAttr(est.destination_event || '—') + '</td><td>' + formatDate(est.leave_date) + ' – ' + formatDate(est.return_date) + '</td>'
+        return '<tr><td>' + escAttr(est.destination_event || '—') + (est.event_name ? ' — ' + escAttr(est.event_name) : '') + '</td><td>' + formatDate(est.leave_date) + ' – ' + formatDate(est.return_date) + '</td>'
           + '<td><span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></td>'
           + '<td>$' + grand.toFixed(2) + '</td><td>' + (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2) + '</td><td>' + action + '</td></tr>';
       }).join('') + '</tbody></table></div>';
@@ -802,7 +990,7 @@ function renderTexReadOnlyDetail(r){
   var variance = parseFloat(r.variance_total) || 0;
 
   wrap.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Expense Report — ' + escAttr(est.destination_event || '—') + ' <span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></div>'
+    + '<div class="tk-section-title">Expense Report — ' + escAttr(est.destination_event || '—') + (est.event_name ? ' — ' + escAttr(est.event_name) : '') + ' <span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></div>'
     + '<div class="placeholder-sub" style="margin-bottom:14px;">This report is ' + r.current_status + ' and can no longer be edited here.</div>'
     + '<div class="profile-grid">'
     + travelReadOnlyField('Actual Dates', formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date))
@@ -947,7 +1135,7 @@ async function submitTravelExpense(targetStatus){
 async function openExpenseApproval(expenseId){
   var detail = document.getElementById('travel-approval-detail');
   detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
-  var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,leave_date,return_date)').eq('id', expenseId).limit(1);
+  var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date)').eq('id', expenseId).limit(1);
   if(!rows || !rows.length){ detail.innerHTML = ''; return; }
   var r = rows[0];
   var est = r.travel_estimates || {};
@@ -963,7 +1151,8 @@ async function openExpenseApproval(expenseId){
   detail.innerHTML = '<div class="tk-entry-card">'
     + '<div class="tk-section-title">Expense Report — ' + escAttr(names[r.created_by] || '—') + '</div>'
     + '<div class="profile-grid">'
-    + travelReadOnlyField('Destination / Event', est.destination_event)
+    + travelReadOnlyField('Destination', est.destination_event)
+    + travelReadOnlyField('Event Name', est.event_name)
     + travelReadOnlyField('Actual Dates', formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date))
     + travelReadOnlyField('Actual Grand Total', '$' + grand.toFixed(2))
     + travelReadOnlyField('Variance vs. Estimate', (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2))

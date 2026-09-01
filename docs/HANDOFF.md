@@ -1,146 +1,135 @@
 # Handoff — COA Customer Demo
 
-Full design history lives in the Claude project ("COA self service portal", docs
-`demo-portal-design.md` and `ssp-log.md`). This file is the standalone summary for
-picking the build up in Claude Code.
+Standalone summary for picking this build up in a new Claude Code session. Read this
+file first — it reflects the actual current state as of 2026-09-01, not the original
+plan (a lot has changed/expanded since the first draft of this doc).
 
 ## What this is
 
-A prospect-facing demo of two features destined for the real COA portal's "for
-purchase" customer module: a Contract Financial Dashboard (CLIN/SLIN burndown, funding,
-ODC commitments) and the Travel estimate/reimbursement workflow. Seeded with 3-4 years
-of fake data for a fictional company, "Axiom Forward Consulting." Fully standalone —
-Supabase + Vercel, no dependency on the GCC-track Azure build.
+A prospect-facing demo for "Axiom Forward Consulting" (fictional), showing off two
+features destined for the real COA portal's "for purchase" customer module: a Contract
+Financial Dashboard (CLIN/SLIN burndown, funding, ODC commitments) and a full Travel
+Estimate/Expense Report workflow. Supabase + Vercel, no framework, no build step beyond
+one tiny script that injects env vars at deploy time.
 
-## Live services
+## Live services — everything below is actually deployed and working
 
-- Supabase project: https://zbcokdvluymdezvirmbq.supabase.co (anon key is in
-  `js/supabaseClient.js`'s expected `window.__ENV__` shape — not yet wired to a real
-  value in this repo; inject at deploy time).
-- GitHub repo: this one.
-- Vercel project: not yet created.
+- **App:** https://coa-customer-demo.vercel.app
+- **GitHub:** https://github.com/rickgreenfield09-afk/coa-customer-demo (private repo).
+  Commits must be authored as `rickgreenfield09-afk <278198456+rickgreenfield09-afk@users.noreply.github.com>`
+  — Vercel's Hobby plan blocks deploys from a commit author it doesn't recognize as a
+  collaborator (learned this the hard way; the fix is that exact author string).
+- **Supabase:** https://zbcokdvluymdezvirmbq.supabase.co — all 9 migrations run
+  successfully (see below). Custom SMTP is wired to **Resend** (fixes the default
+  Supabase email rate limit) with sender `ricky.greenfield@axiomfwd.com` — a proper
+  no-reply address was still pending as of last session.
+- **Vercel env vars** (Project → Environment Variables): `SUPABASE_URL`,
+  `SUPABASE_ANON_KEY` — read by `scripts/generate-env.js` (the `npm run build` command
+  in `vercel.json`) to write `js/env.js` at deploy time. Locally, copy
+  `js/env.example.js` to `js/env.js` (gitignored) and fill in the same two values to
+  run `npx serve .` locally.
+- **Supabase Edge Function `send-report`** — deployed, sends a sample dashboard report
+  via Resend to the calling user's own email (never an arbitrary address). Secrets
+  `RESEND_API_KEY` / `REPORT_FROM_EMAIL` are set on the Supabase project, not in this
+  repo. To redeploy: `npx supabase functions deploy send-report` (needs
+  `SUPABASE_ACCESS_TOKEN` env var or `supabase login` — a personal access token from
+  supabase.com/dashboard/account/tokens is the non-interactive path).
 
-## Running the migrations (not yet done against the live project)
+## Migrations — all run, in this order, against the live project
 
-Two migration files, run in this exact order, both via the Supabase SQL Editor for
-https://zbcokdvluymdezvirmbq.supabase.co (SQL Editor > New Query > paste > Run):
+| File | What it did |
+|---|---|
+| `0001_core_schema.sql` | Full initial schema + RLS (customers/contracts/billing_nodes/slins/funding/time_entries/travel/odc_commitments/personas/demo_employees/profiles). |
+| `0002_persona_lifecycle.sql` | `clone_persona()` (security definer), demo-reset lifecycle (`reset_my_demo_session`, `admin_reset_all_demo_sessions`, `sweep_expired_demo_sessions` via pg_cron every 15 min, 2hr idle threshold), FK cascade/set-null fixes. |
+| `0003_seed_demo_data.sql` | First seed pass — one contract, ~3.5yrs history, 2 template employees (Jordan Ellis/Morgan Reyes). |
+| `0004_customer_admin_financial_rw.sql` | Widened Customer Admin's RLS write access from just `odc_commitments` to also `contracts`/`billing_nodes`/`slins`/`slin_funding_history`. |
+| `0005_dashboard_read_visibility.sql` | Fixed `time_entries`/`travel_estimates`/`travel_expenses` SELECT policies from owner-only to read-all-authenticated — Customer Admin/Viewer had been seeing zero burn data. |
+| `0006_theme_preference.sql` | `profiles.theme_preference` column for the light/dark toggle. |
+| `0007_contract_contacts_and_fields.sql` | `contract_contacts` table + `issuing_organization`/`dpas_priority_rating`/`payment_terms` on `contracts`. |
+| `0008_seed_expanded_dataset.sql` | Expanded seed to 4 contracts / 3 fictional issuing orgs (Solari Federal Solutions, Northgate Defense Group ×2, Vantage Point Systems) / 9 Task Orders / ~39 SLINs / 16 more template employees, via a reusable `_seed_task_order()` helper function (dropped at the end of the migration). |
+| `0009_travel_module_expansion.sql` | Full per-diem/EWW/fee-multiplier calculator fields on `travel_estimates`/`travel_expenses`, `travel_estimate_audit_log`/`travel_expense_audit_log`/`travel_settings`/`travel_expense_receipts` tables, `travel-receipts` Storage bucket, widened write RLS (`is_employee_side_actor()`) so Supervisor can act on someone else's submission. |
 
-1. **`supabase/migrations/0001_core_schema.sql`** — run this first, in full, top to
-   bottom, exactly once. Creates every table, function, and RLS policy from scratch.
-   Only safe to run against a fresh project with none of these tables already present.
-2. **`supabase/migrations/0002_persona_lifecycle.sql`** — run this second, immediately
-   after 0001 succeeds, in full, top to bottom, exactly once. Alters four tables' foreign
-   keys (adds `on delete cascade`/`set null` behavior) and adds the persona-clone and
-   demo-reset functions. Requires the `pg_cron` extension enabled first — **done** as of
-   2026-08-30 (Database > Extensions). If this migration is ever re-run against a project
-   where it already succeeded, the `cron.schedule(...)` call at the bottom will error
-   ("job already exists") — that's expected; either skip re-running it or call
-   `cron.unschedule('sweep-expired-demo-sessions')` first.
+**Gotchas hit while writing these** (useful if you're about to write SQL against this
+project): Postgres has no `timestamp + integer` or `date + numeric` operator — always
+cast date/interval arithmetic explicitly (`(x - y)::int`, `expr::date`) rather than
+relying on implicit coercion, especially across `generate_series` and function-call
+argument boundaries.
 
-After both run, verify: `select * from cron.job;` in the SQL Editor should show one row
-named `sweep-expired-demo-sessions` running every 15 minutes.
+## What's built and working
 
-No further SQL needs to be run manually beyond these two files for the current build
-phase — the seed script (next up) will be its own file, run the same way (SQL Editor,
-service role context), and I'll call it out explicitly when it's ready.
+- **Auth:** Supabase magic link, invite-only (`shouldCreateUser:false`), redirect URL
+  now points at the Vercel domain (not localhost).
+- **Role picker:** 4 personas — Employee, Supervisor (employee-category), Customer
+  Admin, Customer Viewer (customer-category). `clone_persona()` clones a template
+  `demo_employees` row for employee-side personas; upserts `customer_users` for
+  customer-side.
+- **Contract Financial Dashboard** (`js/dashboard.js`): redesigned to match an approved
+  reference mockup — navy topbar with Customer/Contract/Task Order/SLIN-multiselect/
+  Start-Date/End-Date filters, 6-tile KPI strip, Labor CLIN cards (progress bar + time
+  gauge), Open ODC Commitments table, ODC CLIN gauge cards (horizontal layout), a
+  hand-rolled SVG burn-up chart (Funded/Actual/EAC/Exhaustion lines), Forecast Summary
+  bar with an "Email Me This Report" button. Layout uses CSS Grid (`#screen-home.active`)
+  with exactly one flexible row — everything else is fixed/auto height so nothing gets
+  squeezed out on short viewports (a real bug we hit and fixed: don't go back to nested
+  flexbox with competing flex-shrink priorities for this screen).
+- **Travel module** (`js/travel.js`, new 2026-08-31): full per-diem/EWW calculator
+  ported from a sibling project (COA-pilot-portal) — structure/formulas only, no real
+  company data. Workflow: Employee submits estimate → Supervisor approves internally →
+  **Customer Admin gives final travel authorization** (this is the Prime/customer side,
+  reusing the existing persona — no new persona was needed) → Employee expenses it →
+  Supervisor approves reimbursement (single-stage, Customer Admin has no reimbursement
+  role). Receipt uploads via the `travel-receipts` Storage bucket. Estimates carry a
+  `slin_id` (added beyond the pilot portal's original schema) so travel cost rolls into
+  the Dashboard's ODC burn.
+- **Settings screen:** light/dark theme toggle, persisted to `profiles.theme_preference`.
+- **Demo session lifecycle:** reset-on-logout + idle-timeout sweep, see 0002 above.
 
-## Schema
+**Two real bugs just fixed (2026-09-01), worth double-checking if anything travel-related
+looks broken next session:** `formatDate()` was called throughout `travel.js` but never
+defined anywhere in this app (added to `js/app.js`, mirrors the pilot portal's UTC-safe
+date parser) — and `#screen-travel` had a leftover inline `style="display:block"` that
+permanently overrode the `.screen{display:none}` toggle, so Travel content was bleeding
+onto every tab regardless of which was active. Both fixed and deployed; **not yet
+re-confirmed by the user in a real end-to-end session** — that's the first thing to
+verify next.
 
-`supabase/migrations/0001_core_schema.sql` — key design decisions baked into it:
+## Not yet built / logical next steps
 
-- **CLIN/SLIN** is one concept with a display label set per contract
-  (`contracts.line_item_label`), not a structural split.
-- **Burndown** reads the latest `slin_funding_history.cumulative_total` per SLIN as the
-  funded ceiling; actual burn = `time_entries` (hours × `employee_rates.bill_rate_with_fee`)
-  + fee (`× slins.fee_percentage`) + ODC (travel + `odc_commitments` actuals). Projection
-  logic (trailing-average burn rate, run-out date vs. `pop_end`) is application-layer,
-  not in the schema.
-- **ODC Commitments** (`odc_commitments`) cover the full "commit then close" lifecycle in
-  one row — open with an estimate, close with the actual amount/date. This is also where
-  non-travel ODC actuals get recorded at all.
-- **Persona/"assumed identity" model:** `demo_employees` rows with `owner_profile_id
-  null` are templates (seeded history, read-only); on first role selection a clone
-  function (not yet written) copies a template row plus its `time_entries`/
-  `travel_estimates` into new rows owned by the guest. Customer-side personas
-  (`customer_users.role`) don't clone anything — they view shared contract data scoped
-  by which `customer_id` the guest is acting as.
-- **Travel** ties to a SLIN via `travel_estimates.slin_id`/`travel_expenses.slin_id` so
-  it rolls into ODC burndown; an approved-but-not-expensed estimate is the "Committed"
-  side, an expensed one is "Actual" — no separate commitments table needed for travel.
-
-RLS is Supabase-native (`auth.uid()`), not the session-variable pattern used on the
-GCC-track build (that pattern was required there because Azure Functions sits between
-Entra ID and Postgres; Supabase's PostgREST layer means native RLS works directly here).
-
-**Known gaps in 0001, resolved by 0002:** the persona-clone operation is now
-`clone_persona(persona_id)`, a `security definer` function — a guest can no longer clone
-an arbitrary `demo_employees` row via a raw client insert. Demo-session lifecycle (see
-below) is also handled there. **Still open:** open/close write-permission split on
-`odc_commitments` (current RLS treats open/edit/close the same — left as-is, low risk for
-a sales demo); the seed script still needs to run as the service role to populate
-template data (unchanged, not a bug — just not written yet).
-
-## Persona role split (confirmed 2026-08-30, `0004_customer_admin_financial_rw.sql`)
-
-- **Employee** — logs time, submits travel estimates/expenses for themselves.
-- **Supervisor** — everything Employee can do, plus approves travel for their team.
-- **Customer Admin** — full read/write on the Contract Financial Dashboard: contracts,
-  SLINs, funding mods, and ODC commitments (open/close), scoped to their own
-  `customer_id`. (0001 only gave this role write access to `odc_commitments` — 0004
-  extended it to `contracts`/`billing_nodes`/`slins`/`slin_funding_history` to match.)
-- **Customer Viewer** — strictly read-only on the same dashboard. No RLS write policy
-  ever matches this role — confirmed, not something that needed a fix.
-
-`labor_categories`/`employee_rates` (Axiom Forward's internal billing-rate data) stay
-platform-admin-only — not extended to Customer Admin, since a client-side persona editing
-the consultancy's own internal rates doesn't make sense for this demo.
-
-## Demo session lifecycle (added 2026-08-30, `0002_persona_lifecycle.sql`)
-
-Guests can freely create/edit data while exploring the demo, but none of it should ever
-need manual grooming afterward — it resets to the seeded baseline automatically:
-
-- **Explicit logout:** the client must call `reset_my_demo_session()` (RPC) immediately
-  before `supabase.auth.signOut()`. Not yet wired into any screen since auth/logout isn't
-  built yet — call this out again when building screen-auth equivalent.
-- **Abandoned tab / time limit:** a `pg_cron` job (`sweep-expired-demo-sessions`, every 15
-  min) resets any guest whose `profiles.session_started_at` is older than 2 hours. That
-  2-hour threshold is a placeholder — tell me if a live demo/sales call needs it shorter
-  (e.g. 45–60 min) and I'll adjust the interval passed to `sweep_expired_demo_sessions()`
-  in the cron schedule.
-- **Manual full sweep:** `admin_reset_all_demo_sessions()` (RPC, platform-admin only) —
-  useful to force a clean slate between scheduled demos without waiting on the cron job.
-- Reset never touches template rows (`owner_profile_id`/`created_by_*` null) — only rows
-  owned by or created under the specific guest profile being reset.
-
-## Decided, not yet built
-
-- Role picker screen (radio buttons + description per persona, "log out of role").
-- Guided workflow tour (single-tab, notification-driven, auto persona-switch on "Next").
-- White-label settings (company name + logo upload to the `org-logos` Storage bucket;
-  display-only override, doesn't fork the underlying contract data).
-- Contract Financial Dashboard screen: default view = all Task Orders/CLINs-SLINs/full
-  date range; End Date drives cumulative KPI figures, Start Date only zooms the trend
-  chart; burn trend chronological left-to-right, ascending dollars.
-- PDF export of the dashboard — recommended server-side (re-run the same scoped/
-  authorized query, render branded PDF) over client-side screenshot capture.
-- ODC commitment add/close interface for customer_admin + platform admin.
-- Scheduled purge of inactive persona clones (window not yet decided).
-- Basic telemetry (`demo_events`) — capture points not yet wired into any screen.
+- Guided workflow tour (single-tab, notification-driven, auto persona-switch).
+- White-label settings (company name + logo upload to `org-logos` Storage bucket — not
+  yet created).
+- PDF export of the dashboard report (currently HTML email only, via `send-report`).
+- Scheduled purge of inactive persona clones — separate from the idle-session sweep,
+  not yet decided.
+- Telemetry (`demo_events`) — table exists, nothing writes to it yet.
+- End-to-end real-session test of the Travel module (estimate → supervisor approval →
+  customer authorization → expense → reimbursement) hasn't been walked through by the
+  user yet with the two 2026-09-01 fixes in place.
 
 ## Explicitly parked
 
-- Indirect rate monitoring (Fringe/Overhead/G&A cascade, standard vs. actual variance) —
-  pending a meeting to get the real COA process detail. Not in this schema at all yet.
-- EAC ("Projected at Completion") and Confidence-rating formula — proposed but not
-  signed off: EAC = actual-to-date + (trailing burn rate × remaining months to
-  `pop_end`) + open commitments.
+- Indirect rate monitoring (Fringe/Overhead/G&A cascade) — pending a meeting for real
+  COA process detail, not in the schema at all.
+- EAC/Confidence formula on the dashboard is a placeholder, explicitly labeled as "not a
+  signed-off estimating methodology" in the UI — real methodology TBD.
 
-## Source documents this was designed from
+## Operational notes for whoever picks this up
 
-Real COA contract documents were used to derive the burndown/ODC model: a funding
-modification (Mod 19), several monthly task-order invoices (VTTS/VTTL/MCC — labor by
-employee/SLIN, current vs. cumulative), a funding projection workbook (the manual
-"burndown estimation" this feature replaces), and a 2026 Indirect Rate Monitoring
-workbook (parked, see above). None of those documents are in this repo — they live in
-the Claude project's knowledge base if needed for reference.
+- **git author:** see above — always `rickgreenfield09-afk <278198456+...@users.noreply.github.com>`,
+  or Vercel deploys get blocked.
+- **Deploy flow:** push to `main` → GitHub → Vercel auto-deploys → `npm run build` runs
+  `scripts/generate-env.js` → static files served as-is (`outputDirectory: "."` in
+  `vercel.json`, Framework Preset "Other" with Build/Output Command overrides explicitly
+  toggled on in the Vercel dashboard — this did NOT work purely from `vercel.json` alone
+  on this project, worth knowing if a deploy silently no-ops again).
+- **Credentials pattern used throughout this build:** ask the user for a scoped
+  access/API token (Supabase personal access token, GitHub PAT, Vercel token, Resend
+  key), run CLI/API commands directly via Bash rather than walking the user through a
+  terminal — this whole project was built with the user almost never touching a
+  terminal themselves. Tokens are used live and not stored anywhere in the repo.
+- **Testing without a real login:** the Browser tool can't complete Supabase magic-link
+  OAuth, so functional testing was done by opening a blank tab, setting
+  `document.getElementById('login-wrap').style.display='none'` +
+  `#app-shell.classList.add('active')`, faking `currentProfile`/`currentPersonas`, and
+  calling the relevant `load*()` function directly via `javascript_tool`. Useful pattern
+  for catching rendering/syntax bugs before asking the user to test for real.

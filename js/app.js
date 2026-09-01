@@ -78,6 +78,7 @@ async function handleSendMagicLink(){
 }
 
 async function handleSignOut(){
+  if(!confirmLeaveIfTravelFormDirty()){ return; }
   try{
     await supabaseClient.rpc('reset_my_demo_session');
   }catch(e){
@@ -142,6 +143,7 @@ function updateNavVisibility(){
 // ---------- Role picker ----------
 
 async function showRolePicker(){
+  if(!confirmLeaveIfTravelFormDirty()){ return; }
   document.querySelectorAll('.nav-btn').forEach(function(b){ b.classList.remove('active'); });
   document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
   document.getElementById('screen-role-picker').classList.add('active');
@@ -193,7 +195,17 @@ async function selectPersona(personaId){
 
 // ---------- Screen router ----------
 
+// Guards navigating away from an unsaved Travel Estimate (travel.js sets
+// window.teFormDirty via a delegated listener on the open form). Native
+// confirm() is used deliberately — it's synchronous, so it actually blocks
+// the navigation on Cancel, unlike the app's custom modal.
+function confirmLeaveIfTravelFormDirty(){
+  if(typeof travelFormIsDirty !== 'function' || !travelFormIsDirty()){ return true; }
+  return window.confirm('You have unsaved changes to this travel estimate. Click Cancel to go back and save or submit it, or OK to discard your changes and leave.');
+}
+
 function switchScreen(name){
+  if(name !== 'travel' && !confirmLeaveIfTravelFormDirty()){ return; }
   document.querySelectorAll('.nav-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.screen === name); });
   document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
   document.getElementById('screen-' + name).classList.add('active');
@@ -260,17 +272,22 @@ function formatDate(d){
 
 // ---------- Boot ----------
 
+// Supabase re-fires auth events (TOKEN_REFRESHED, and in some cases even
+// SIGNED_IN again) when a background tab regains focus, re-triggering
+// showApp()'s full bootstrap (which resets the screen router to Dashboard)
+// even though it's still the same logged-in user. Event-name checks alone
+// aren't reliable here — gate on whether we've already bootstrapped THIS
+// user id instead, so any refire for an already-signed-in user is a no-op.
+var bootstrappedUserId = null;
+
 supabaseClient.auth.onAuthStateChange(function(event, session){
   if(session && session.user){
-    // Supabase fires TOKEN_REFRESHED (and re-emits the same session) when a
-    // background tab regains focus — only run the full bootstrap (which
-    // resets the screen router to Dashboard) on an actual sign-in, or if we
-    // haven't bootstrapped yet. Otherwise leave whatever screen/form is open
-    // alone; the client already refreshed its session silently.
-    if(event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || !currentProfile){
+    if(session.user.id !== bootstrappedUserId){
+      bootstrappedUserId = session.user.id;
       showApp(session);
     }
   }else if(event === 'SIGNED_OUT'){
+    bootstrappedUserId = null;
     showLogin();
   }
 });

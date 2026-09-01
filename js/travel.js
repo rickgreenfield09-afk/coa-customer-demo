@@ -104,10 +104,32 @@ var teEditingId = null;
 var teEditingRow = null;
 var teLodgingQuotes = [];
 
+// Set true by any edit to the open New/Edit Travel Estimate form (delegated
+// listener below, scoped to #te-estimate-form), cleared on a fresh form load
+// or a successful save — app.js's navigation guards (switchScreen/Switch
+// Role/Sign Out) and the beforeunload handler below check this before
+// letting the user leave the Travel screen with unsaved edits.
+var teFormDirty = false;
+
+function travelFormIsDirty(){
+  return teFormDirty === true;
+}
+
+document.addEventListener('input', function(e){
+  if(e.target.closest && e.target.closest('#te-estimate-form')){ teFormDirty = true; }
+});
+document.addEventListener('change', function(e){
+  if(e.target.closest && e.target.closest('#te-estimate-form')){ teFormDirty = true; }
+});
+window.addEventListener('beforeunload', function(e){
+  if(travelFormIsDirty()){ e.preventDefault(); e.returnValue = ''; }
+});
+
 async function loadMyEstimates(editId){
   var content = document.getElementById('travel-content');
   teEditingId = editId || null;
   teEditingRow = null;
+  teFormDirty = false;
 
   if(!travel.employeeId){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">No employee record found</div><div class="placeholder-sub">Try switching roles and back, or refreshing the page.</div></div>';
@@ -130,6 +152,7 @@ async function loadMyEstimates(editId){
     if(teEditingRow){ tePrefillForm(teEditingRow); }
     await teLoadLodgingQuotes();
     teRecalc();
+    teFormDirty = false;
   }catch(e){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">Couldn\'t load travel estimates</div><div class="placeholder-sub">Try refreshing the page.</div></div>';
     console.error(e);
@@ -137,7 +160,7 @@ async function loadMyEstimates(editId){
 }
 
 function teFormHtml(row){
-  return '<div class="tk-entry-card">'
+  return '<div class="tk-entry-card" id="te-estimate-form">'
     + '<div class="tk-section-title">' + (row ? 'Edit Draft Travel Estimate' : 'New Travel Estimate') + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1.3fr 70px 1fr 100px 140px 140px;">'
     + '<div><label class="field-label" for="te-city">City</label><input class="field-input" id="te-city" placeholder="City" onchange="teMaybeAutoLookupGsa()"></div>'
@@ -368,17 +391,65 @@ function renderTeReadOnlyDetail(r){
     + '</div>';
 }
 
-async function submitTravelEstimate(targetStatus){
-  var errorEl = document.getElementById('te-form-error');
-  errorEl.textContent = '';
+// Shared by submitTravelEstimate and teEnsureDraftId (silent auto-save when
+// attaching lodging quotes before the user has explicitly saved) so both
+// read the same fields the same way.
+function teBuildBody(targetStatus, inputs){
   var city = document.getElementById('te-city').value.trim();
   var state = document.getElementById('te-state').value.trim();
   var eventName = document.getElementById('te-event-name').value.trim();
   var slinId = document.getElementById('te-slin').value;
+  var calc = teCalc(inputs);
+  var destinationEvent = (city && state) ? (city + ', ' + state) : (city || state || null);
+  var body = {
+    destination_event: destinationEvent, city: city || null, state: state || null, event_name: eventName || null, slin_id: slinId || null,
+    leave_date: inputs.leaveDate || null, return_date: inputs.returnDate || null,
+    number_of_trainers: inputs.trainers, per_diem_lodging_rate: inputs.lodgingRate, lodging_cost_per_night: inputs.lodgingCost, per_diem_meals_rate: inputs.mealsRate,
+    lodging_fees: inputs.lodgingFees, lodging_taxes: inputs.lodgingTaxes,
+    airfare_avg: inputs.airfare, airport_parking_transport: inputs.parkingTransport, baggage: inputs.baggage,
+    rental_car: inputs.rentalCar, fuel_gas: inputs.fuelGas, parking: inputs.parking, tolls: inputs.tolls, rideshare_estimate: inputs.rideshare, mileage: inputs.mileage,
+    shipping_to: inputs.shippingTo, shipping_back: inputs.shippingBack,
+    eww_rate: inputs.ewwRate, eww_hours_per_trainer: inputs.ewwHours,
+    per_traveler_subtotal: calc.perTravelerInternal, trip_lead_total: calc.tripLeadInternal,
+    estimated_total_odc: calc.tripLeadInternal, eww_total: calc.ewwTotal, status: targetStatus
+  };
+  if(targetStatus === 'submitted'){ body.fee_multiplier_used = travel.feeMultiplier; }
+  return { body: body, city: city, state: state, slinId: slinId };
+}
+
+// Silently creates a draft row from the form's current values, without
+// resetting/reloading the form, so the user can attach lodging comparison
+// quotes before explicitly clicking Save as Draft. No-op (returns the
+// existing id) if the estimate is already saved.
+async function teEnsureDraftId(){
+  if(teEditingId){ return teEditingId; }
   var inputs = teReadFormInputs();
+  var built = teBuildBody('draft', inputs);
+  try{
+    var body = built.body;
+    body.created_by = travel.employeeId;
+    var { data: inserted, error } = await supabaseClient.from('travel_estimates').insert(body).select('id').single();
+    if(error){ throw error; }
+    teEditingId = inserted.id;
+    await supabaseClient.from('travel_estimate_audit_log').insert({
+      estimate_id: teEditingId, changed_by: currentProfile.id, action: 'edit', previous_status: null, new_status: 'draft'
+    });
+    teFormDirty = false;
+    return teEditingId;
+  }catch(e){
+    console.error(e);
+    return null;
+  }
+}
+
+async function submitTravelEstimate(targetStatus){
+  var errorEl = document.getElementById('te-form-error');
+  errorEl.textContent = '';
+  var inputs = teReadFormInputs();
+  var built = teBuildBody(targetStatus, inputs);
 
   if(targetStatus === 'submitted'){
-    if(!city || !state || !slinId || !inputs.leaveDate || !inputs.returnDate){
+    if(!built.city || !built.state || !built.slinId || !inputs.leaveDate || !inputs.returnDate){
       errorEl.textContent = 'City, State, SLIN, and both dates are required to submit.';
       return;
     }
@@ -395,21 +466,7 @@ async function submitTravelEstimate(targetStatus){
     }
   }
 
-  var calc = teCalc(inputs);
-  var destinationEvent = (city && state) ? (city + ', ' + state) : (city || state || null);
-  var body = {
-    destination_event: destinationEvent, city: city || null, state: state || null, event_name: eventName || null, slin_id: slinId || null,
-    leave_date: inputs.leaveDate || null, return_date: inputs.returnDate || null,
-    number_of_trainers: inputs.trainers, per_diem_lodging_rate: inputs.lodgingRate, lodging_cost_per_night: inputs.lodgingCost, per_diem_meals_rate: inputs.mealsRate,
-    lodging_fees: inputs.lodgingFees, lodging_taxes: inputs.lodgingTaxes,
-    airfare_avg: inputs.airfare, airport_parking_transport: inputs.parkingTransport, baggage: inputs.baggage,
-    rental_car: inputs.rentalCar, fuel_gas: inputs.fuelGas, parking: inputs.parking, tolls: inputs.tolls, rideshare_estimate: inputs.rideshare, mileage: inputs.mileage,
-    shipping_to: inputs.shippingTo, shipping_back: inputs.shippingBack,
-    eww_rate: inputs.ewwRate, eww_hours_per_trainer: inputs.ewwHours,
-    per_traveler_subtotal: calc.perTravelerInternal, trip_lead_total: calc.tripLeadInternal,
-    estimated_total_odc: calc.tripLeadInternal, eww_total: calc.ewwTotal, status: targetStatus
-  };
-  if(targetStatus === 'submitted'){ body.fee_multiplier_used = travel.feeMultiplier; }
+  var body = built.body;
 
   try{
     var previousStatus = teEditingRow ? teEditingRow.status : null;
@@ -430,7 +487,7 @@ async function submitTravelEstimate(targetStatus){
       previous_status: previousStatus, new_status: targetStatus
     });
 
-    teEditingId = null; teEditingRow = null;
+    teEditingId = null; teEditingRow = null; teFormDirty = false;
     loadMyEstimates();
   }catch(e){
     errorEl.textContent = 'Couldn\'t save travel estimate. Try again.';
@@ -512,8 +569,15 @@ function teLodgingQuotesModalBody(){
 
 async function teOpenLodgingQuotesModal(){
   if(!teEditingId){
-    openModal('Comparison Quotes', '<div class="placeholder-sub">Save as Draft first to attach comparison quotes.</div>', '<button class="btn-cancel" onclick="closeModal()">Close</button>');
-    return;
+    // Silently save a draft from the form's current values so quotes can be
+    // attached right away, without the user having to click Save as Draft
+    // themselves first.
+    openModal('Comparison Quotes', '<div class="placeholder-sub">Saving a draft so quotes can be attached...</div>', '');
+    var id = await teEnsureDraftId();
+    if(!id){
+      openModal('Comparison Quotes', '<div class="login-error">Couldn\'t save a draft automatically — try clicking Save as Draft below, then Upload Comparison Quotes again.</div>', '<button class="btn-cancel" onclick="closeModal()">Close</button>');
+      return;
+    }
   }
   await teLoadLodgingQuotes();
   openModal('Lodging Comparison Quotes', teLodgingQuotesModalBody(), '<button class="btn-cancel" onclick="teCloseLodgingQuotesModal()">Close</button>');

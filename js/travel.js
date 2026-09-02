@@ -167,14 +167,27 @@ async function loadMyEstimates(editId){
       if(rows && rows.length){ teEditingRow = rows[0]; }
     }
 
-    if(teEditingRow && teEditingRow.status !== 'draft'){
+    var readOnlyStatuses = ['approved', 'expensed', 'paid', 'supervisor_approved'];
+    if(teEditingRow && readOnlyStatuses.indexOf(teEditingRow.status) !== -1){
       content.innerHTML = '<div id="te-detail-wrap"></div><div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
       renderTeReadOnlyDetail(teEditingRow);
       return;
     }
 
+    var teRejectionNote = null;
+    if(teEditingRow && (teEditingRow.status === 'returned' || teEditingRow.status === 'denied')){
+      try{
+        var { data: noteRows } = await supabaseClient.from('travel_estimate_audit_log').select('*').eq('estimate_id', teEditingId).in('new_status', ['returned', 'denied']).order('changed_at', { ascending: false }).limit(1);
+        if(noteRows && noteRows.length && noteRows[0].field_changes && noteRows[0].field_changes.note){
+          teRejectionNote = noteRows[0].field_changes.note;
+        }
+      }catch(e){
+        console.error(e);
+      }
+    }
+
     await teLoadTravelers();
-    content.innerHTML = teFormHtml(teEditingRow) + '<div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
+    content.innerHTML = teFormHtml(teEditingRow, teRejectionNote) + '<div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
     if(teEditingRow){ tePrefillForm(teEditingRow); }
     await teLoadLodgingQuotes();
     teRecalc();
@@ -310,9 +323,18 @@ async function teSaveTravelers(estimateId){
   if(insErr){ throw insErr; }
 }
 
-function teFormHtml(row){
+function teFormHtml(row, rejectionNote){
+  var formTitle = row ? ((row.status === 'returned' || row.status === 'denied') ? 'Edit & Resubmit Travel Estimate' : 'Edit Draft Travel Estimate') : 'New Travel Estimate';
+  var rejectionBannerHtml = '';
+  if(row && (row.status === 'returned' || row.status === 'denied') && rejectionNote){
+    rejectionBannerHtml = '<div class="warning-box">'
+      + '<div><div class="warning-box-title">' + (row.status === 'denied' ? 'This request was denied' : 'This request was returned') + '</div>'
+      + '<div class="warning-box-text">' + escAttr(rejectionNote) + '</div></div>'
+      + '</div>';
+  }
   return '<div class="tk-entry-card" id="te-estimate-form">'
-    + '<div class="tk-section-title">' + (row ? 'Edit Draft Travel Estimate' : 'New Travel Estimate') + '</div>'
+    + '<div class="tk-section-title">' + formTitle + '</div>'
+    + rejectionBannerHtml
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 90px 343px;">'
     + '<div><label class="field-label" for="te-event-name">Event Name</label><input class="field-input" id="te-event-name" placeholder="Event name"></div>'
     + '<div><label class="field-label" for="te-city">City</label><input class="field-input" id="te-city" placeholder="City" onchange="teMaybeAutoLookupGsa()"></div>'
@@ -530,9 +552,8 @@ async function teRenderMyEstimatesTable(){
   return '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Destination / Event</th><th>Dates</th><th>Status</th><th>Grand Total</th><th></th></tr></thead><tbody>'
     + rows.map(function(r){
         var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
-        var action = r.status === 'draft'
-          ? '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">Edit Draft</button>'
-          : '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">View</button>';
+        var actionLabel = r.status === 'draft' ? 'Edit Draft' : (r.status === 'returned' || r.status === 'denied') ? 'Edit & Resubmit' : 'View';
+        var action = '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">' + actionLabel + '</button>';
         return '<tr><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
           + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td>'
           + '<td><span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></td>'
@@ -598,6 +619,10 @@ function teBuildBody(targetStatus, inputs){
     status: targetStatus
   };
   if(targetStatus === 'submitted'){ body.fee_multiplier_used = travel.feeMultiplier; }
+  if(targetStatus === 'submitted' && teEditingRow && (teEditingRow.status === 'returned' || teEditingRow.status === 'denied')){
+    body.approved_by = null;
+    body.approved_at = null;
+  }
   return { body: body, city: city, state: state, slinId: slinId };
 }
 
@@ -678,6 +703,10 @@ async function submitTravelEstimate(targetStatus){
       action: (previousStatus && previousStatus !== targetStatus) ? 'status_change' : 'edit',
       previous_status: previousStatus, new_status: targetStatus
     });
+
+    if(targetStatus === 'submitted'){
+      notifySelf('Travel estimate submitted', '<p>Your travel estimate for <strong>' + escAttr(body.destination_event || body.event_name || 'your trip') + '</strong> has been submitted. Switch to your Supervisor view to review and approve it.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+    }
 
     teEditingId = null; teEditingRow = null; teFormDirty = false;
     await loadMyEstimates();
@@ -1022,6 +1051,13 @@ async function estimateApprovalAction(estimateId, decision){
       field_changes: { note: noteField ? noteField.value.trim() : null }, previous_status: previousStatus, new_status: decision
     });
 
+    var approvalNote = noteField ? noteField.value.trim() : '';
+    if(decision === 'supervisor_approved'){
+      notifySelf('Travel estimate approved internally', '<p>Your travel estimate has been approved internally. Switch to your Customer Admin view to authorize it for the Prime.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+    }else{
+      notifySelf('Travel estimate ' + decision, '<p>You ' + decision + ' a travel estimate' + (approvalNote ? ': ' + escAttr(approvalNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+    }
+
     document.getElementById('travel-approval-detail').innerHTML = '';
     loadApprovalsQueue();
   }catch(e){
@@ -1109,6 +1145,13 @@ async function authorizationAction(estimateId, decision){
       estimate_id: estimateId, changed_by: currentProfile.id, action: 'status_change',
       field_changes: { note: noteField ? noteField.value.trim() : null }, new_status: decision
     });
+
+    var authNote = noteField ? noteField.value.trim() : '';
+    if(decision === 'approved'){
+      notifySelf('Travel authorized', '<p>A travel estimate has been authorized for the Prime. Switch to your Employee view once travel is complete to expense it.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+    }else{
+      notifySelf('Travel authorization ' + decision, '<p>You ' + decision + ' a travel authorization' + (authNote ? ': ' + escAttr(authNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+    }
 
     document.getElementById('travel-authorization-detail').innerHTML = '';
     loadAuthorizationsQueue();

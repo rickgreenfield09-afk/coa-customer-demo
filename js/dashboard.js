@@ -525,8 +525,12 @@ function buildReportHtml(){
     + '<h3>Open ODC Commitments</h3>'
     + '<table style="' + tableStyle + '"><tr><th style="' + thStyle + '">Description</th><th style="' + thStyle + '">SLIN</th><th style="' + thStyle + '">Amount</th><th style="' + thStyle + '">Expected</th></tr>'
     + (openOdc || '<tr><td style="' + tdStyle + '" colspan="4">None in scope.</td></tr>') + '</table>'
-    + '<p style="color:#767C8A;font-size:11px;">This is a sample report generated from the Axiom Forward Consulting demo. Forecast figures are a placeholder methodology, not signed off.</p>'
+    + '<p style="color:#767C8A;font-size:11px;">This is a sample report generated from the ' + escAttr(companyDisplayName()) + ' demo. Forecast figures are a placeholder methodology, not signed off.</p>'
     + '</div>';
+}
+
+function companyDisplayName(){
+  return (currentProfile && currentProfile.display_company_name) || 'Axiom Forward Consulting';
 }
 
 async function emailReport(){
@@ -534,7 +538,7 @@ async function emailReport(){
   statusEl.textContent = 'Sending...';
   try{
     var { data, error } = await supabaseClient.functions.invoke('send-report', {
-      body: { subject: 'Axiom Forward Consulting — Sample Contract Financial Report', html: buildReportHtml() }
+      body: { subject: companyDisplayName() + ' — Sample Contract Financial Report', html: buildReportHtml() }
     });
     if(error){ throw error; }
     if(data && data.error){ throw new Error(data.error); }

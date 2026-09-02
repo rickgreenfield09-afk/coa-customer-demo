@@ -52,25 +52,34 @@ async function ensurePersonasLoaded(){
 // ---------- Auth ----------
 
 async function handleSendMagicLink(){
+  var name = document.getElementById('login-name').value.trim();
+  var company = document.getElementById('login-company').value.trim();
+  var title = document.getElementById('login-title').value.trim();
   var email = document.getElementById('login-email').value.trim();
   var errorEl = document.getElementById('login-error');
   errorEl.textContent = '';
-  if(!email){ errorEl.textContent = 'Enter your email.'; return; }
+  if(!name || !company || !email){ errorEl.textContent = 'Name, Company, and Email are required.'; return; }
 
   var btn = document.getElementById('login-btn');
   btn.disabled = true;
   try{
+    // shouldCreateUser: true — self-serve signup. handle_new_auth_user()
+    // (Supabase trigger, migration 0015) only runs on a genuine new
+    // auth.users row, so this metadata is ignored for a returning user;
+    // it's captured once, at first signup, not re-sent on every login.
     var { error } = await supabaseClient.auth.signInWithOtp({
       email: email,
-      options: { shouldCreateUser: false, emailRedirectTo: window.location.origin + window.location.pathname }
+      options: {
+        shouldCreateUser: true,
+        data: { full_name: name, company_name: company, title: title || null },
+        emailRedirectTo: window.location.origin + window.location.pathname
+      }
     });
     if(error){ throw error; }
     document.getElementById('login-form').style.display = 'none';
     document.getElementById('login-sent').style.display = 'block';
   }catch(e){
-    errorEl.textContent = (e.code === 'otp_disabled')
-      ? 'This email hasn\'t been invited to the demo yet — ask your contact for an invite.'
-      : (e.message || 'Could not send the magic link — try again.');
+    errorEl.textContent = e.message || 'Could not send the magic link — try again.';
     console.error(e);
   }finally{
     btn.disabled = false;
@@ -114,6 +123,11 @@ async function showApp(session){
   currentProfile = rows && rows[0];
   await ensurePersonasLoaded();
   applyTheme(currentProfile ? currentProfile.theme_preference : 'dark');
+  // White-label: a real signup's own company name (captured at signup,
+  // migration 0015) replaces the placeholder everywhere post-login. The
+  // login screen itself stays generic — there's no profile yet pre-auth.
+  var companyNameEl = document.getElementById('header-company-name');
+  if(companyNameEl){ companyNameEl.textContent = (currentProfile && currentProfile.display_company_name) || 'Axiom Forward Consulting'; }
 
   if(currentProfile && currentProfile.active_persona_id){
     document.getElementById('switch-role-btn').style.display = '';
@@ -214,6 +228,23 @@ function switchScreen(name){
   if(name === 'burndown' && typeof loadBurndownScreen === 'function'){ loadBurndownScreen(); }
   if(name === 'odc' && typeof loadOdcScreen === 'function'){ loadOdcScreen(); }
   if(name === 'settings'){ renderThemeToggle(); }
+}
+
+// ---------- Self-notification email (workflow nudges — "switch your role
+// and act on this") ----------
+// Reuses the send-report Edge Function, which only ever emails the calling
+// user's own verified address (never a body-supplied one) — this is a
+// single real person playing every persona via the role picker, so "notify
+// the approver" means "email myself a reminder to switch roles," not
+// emailing a different party. Fire-and-forget: a failed notification
+// shouldn't block the workflow action that triggered it.
+async function notifySelf(subject, html){
+  try{
+    var { error } = await supabaseClient.functions.invoke('send-report', { body: { subject: subject, html: html } });
+    if(error){ throw error; }
+  }catch(e){
+    console.error('Notification email failed (continuing anyway):', e);
+  }
 }
 
 // ---------- Shared toast (brief, self-dismissing success/status message —

@@ -28,6 +28,12 @@
       <div class="login-logo">AXIOM FORWARD</div>
       <div class="login-sub">CONTRACT PORTAL DEMO</div>
       <div id="login-form">
+        <label class="field-label" for="login-name">Name</label>
+        <input type="text" id="login-name" class="field-input" placeholder="Jane Doe" autocomplete="name">
+        <label class="field-label" for="login-company">Company</label>
+        <input type="text" id="login-company" class="field-input" placeholder="Your Company" autocomplete="organization">
+        <label class="field-label" for="login-title">Title <span style="text-transform:none;">(optional)</span></label>
+        <input type="text" id="login-title" class="field-input" placeholder="Program Manager" autocomplete="organization-title">
         <label class="field-label" for="login-email">Email</label>
         <input type="email" id="login-email" class="field-input" placeholder="you@company.com" autocomplete="username">
         <button class="btn btn-primary" id="login-btn" onclick="handleSendMagicLink()">Send Magic Link</button>

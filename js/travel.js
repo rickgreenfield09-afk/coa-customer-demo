@@ -1197,6 +1197,63 @@ var texEditingRow = null;
 var texAvailableEstimates = [];
 var texLinkedEstimateTotals = { tripLead: 0, eww: 0 };
 
+// Estimated-cost comparison figures (one per Actual Costs category), derived
+// from the linked travel_estimates row via texComputeEstimatedCosts — see
+// that function for the field mapping (direct 1:1s, the 5-field
+// transportation sum, and the lodging nights*rate+fees+taxes calc).
+var texEstimatedCosts = { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTotal: 0, rentalCar: 0, mileage: 0, shippingTo: 0, shippingBack: 0 };
+
+// Receipts for the currently-open expense, grouped by category (migration
+// 0017 added travel_expense_receipts.category). Populated by
+// texLoadReceiptsByCategory, read by texRenderCategoryReceipts.
+var texReceiptsByCategory = {};
+
+// One row per Actual Costs category — drives both texActualCostRow's
+// repeated markup and texEstimatedCosts' key names.
+var texCostCategories = [
+  { label: 'Airfare', fieldId: 'tex-airfare', category: 'airfare', estimatedKey: 'airfare' },
+  { label: 'Airport Parking / Transport', fieldId: 'tex-parking-transport', category: 'airport_parking', estimatedKey: 'parkingTransport' },
+  { label: 'Baggage', fieldId: 'tex-baggage', category: 'baggage', estimatedKey: 'baggage' },
+  { label: 'Lodging (actual total)', fieldId: 'tex-lodging-total', category: 'lodging', estimatedKey: 'lodgingTotal' },
+  { label: 'Rental Car / Gas / Parking / Tolls', fieldId: 'tex-rental-car', category: 'rental_car', estimatedKey: 'rentalCar' },
+  { label: 'Mileage', fieldId: 'tex-mileage', category: 'mileage', estimatedKey: 'mileage' },
+  { label: 'Shipping (to)', fieldId: 'tex-shipping-to', category: 'shipping_to', estimatedKey: 'shippingTo' },
+  { label: 'Shipping (back)', fieldId: 'tex-shipping-back', category: 'shipping_back', estimatedKey: 'shippingBack' }
+];
+
+// Shared by loadMyExpenses (editing an existing report) and
+// texEstimateSelected (picking an estimate for a new report) so both derive
+// the 8 "estimated" comparison values from a travel_estimates row the same
+// way. Lodging is nights * cost-per-night + fees + taxes; the transportation
+// bucket sums all 5 estimate-side split fields into one comparable total
+// against the expense side's single combined field.
+function texComputeEstimatedCosts(est){
+  if(!est){ return { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTotal: 0, rentalCar: 0, mileage: 0, shippingTo: 0, shippingBack: 0 }; }
+  var leave = est.leave_date ? new Date(est.leave_date) : null;
+  var ret = est.return_date ? new Date(est.return_date) : null;
+  var nights = (leave && ret) ? Math.round((ret - leave) / 86400000) : 0;
+  if(nights < 0){ nights = 0; }
+  var lodgingTotal = (nights * (parseFloat(est.lodging_cost_per_night) || 0)) + (parseFloat(est.lodging_fees) || 0) + (parseFloat(est.lodging_taxes) || 0);
+  var rentalCar = (parseFloat(est.rental_car) || 0) + (parseFloat(est.fuel_gas) || 0) + (parseFloat(est.parking) || 0) + (parseFloat(est.tolls) || 0) + (parseFloat(est.rideshare_estimate) || 0);
+  return {
+    airfare: parseFloat(est.airfare_avg) || 0,
+    parkingTransport: parseFloat(est.airport_parking_transport) || 0,
+    baggage: parseFloat(est.baggage) || 0,
+    lodgingTotal: lodgingTotal,
+    rentalCar: rentalCar,
+    mileage: parseFloat(est.mileage) || 0,
+    shippingTo: parseFloat(est.shipping_to) || 0,
+    shippingBack: parseFloat(est.shipping_back) || 0
+  };
+}
+
+function texRefreshEstimatedCostDisplays(){
+  texCostCategories.forEach(function(c){
+    var el = document.getElementById('tex-estimated-' + c.category);
+    if(el){ el.textContent = '$' + (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0).toFixed(2); }
+  });
+}
+
 async function loadMyExpenses(editId){
   var content = document.getElementById('travel-content');
   texEditingId = editId || null;
@@ -1207,9 +1264,12 @@ async function loadMyExpenses(editId){
     return;
   }
 
+  texEstimatedCosts = texComputeEstimatedCosts(null);
+  texReceiptsByCategory = {};
+
   try{
     if(texEditingId){
-      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer)').eq('id', texEditingId).limit(1);
+      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_per_night,lodging_fees,lodging_taxes)').eq('id', texEditingId).limit(1);
       if(rows && rows.length){ texEditingRow = rows[0]; }
     }
 
@@ -1220,27 +1280,70 @@ async function loadMyExpenses(editId){
     }
 
     if(!texEditingRow){
-      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer').eq('created_by', travel.employeeId).eq('status', 'approved');
+      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_per_night,lodging_fees,lodging_taxes').eq('created_by', travel.employeeId).eq('status', 'approved');
       var { data: existing } = await supabaseClient.from('travel_expenses').select('estimate_id').eq('created_by', travel.employeeId);
       var takenIds = (existing || []).map(function(r){ return r.estimate_id; });
       texAvailableEstimates = (approved || []).filter(function(e){ return takenIds.indexOf(e.id) === -1; });
     }
-
-    content.innerHTML = texFormHtml(texEditingRow) + '<div class="tk-entry-card"><div class="tk-section-title">My Expense Reports</div>' + (await texRenderMyReportsTable()) + '</div>';
 
     if(texEditingRow){
       texLinkedEstimateTotals = {
         tripLead: parseFloat(texEditingRow.travel_estimates && texEditingRow.travel_estimates.trip_lead_total) || 0,
         eww: parseFloat(texEditingRow.travel_estimates && texEditingRow.travel_estimates.eww_total) || 0
       };
+      texEstimatedCosts = texComputeEstimatedCosts(texEditingRow.travel_estimates);
+      await texLoadReceiptsByCategory(texEditingRow.id);
+    }
+
+    content.innerHTML = texFormHtml(texEditingRow) + '<div class="tk-entry-card"><div class="tk-section-title">My Expense Reports</div>' + (await texRenderMyReportsTable()) + '</div>';
+
+    if(texEditingRow){
       texPrefillForm(texEditingRow);
-      texLoadReceipts(texEditingRow.id, false);
     }
     texRecalc();
   }catch(e){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">Couldn\'t load expense reports</div><div class="placeholder-sub">Try refreshing the page.</div></div>';
     console.error(e);
   }
+}
+
+// One row per Actual Costs category: actual-cost input (existing field id,
+// same oninput="texRecalc()" contract) | read-only Estimated Cost box
+// (comparison against the linked estimate, see texComputeEstimatedCosts) |
+// category-scoped receipt upload + thumbnails (see texRenderCategoryReceipts).
+function texActualCostRow(label, fieldId, category, actualValue, estimatedValue){
+  return '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 150px 240px;align-items:end;margin-bottom:10px;">'
+    + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label><input type="number" step="0.01" class="field-input" id="' + fieldId + '" value="' + (actualValue || 0) + '" oninput="texRecalc()"></div>'
+    + '<div class="info-box"><div class="info-label">Estimated</div><div class="info-val" id="tex-estimated-' + category + '">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div>'
+    + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
+    + '</div>';
+}
+
+// Builds the receipt thumbnails + upload button for one Actual Costs
+// category, from texReceiptsByCategory[category]. Image files (by
+// file_name extension) get a small cropped thumbnail; anything else (PDFs,
+// etc.) gets a generic file glyph — no icon library available here. Each
+// thumbnail is a link to the file plus a small red "x" (btn-remove-row,
+// sized down from the Estimate form's 40px traveler-row convention since
+// this sits right next to a 32px thumbnail, not a full form row).
+function texRenderCategoryReceipts(category){
+  var list = texReceiptsByCategory[category] || [];
+  var imgExt = /\.(jpe?g|png|gif|webp)$/i;
+  var thumbsHtml = list.map(function(rec){
+    var isImg = imgExt.test(rec.file_name || '');
+    var thumb = isImg
+      ? '<img src="' + escAttr(rec.file_url) + '" style="width:32px;height:32px;object-fit:cover;border-radius:4px;display:block;">'
+      : '<div style="width:32px;height:32px;border-radius:4px;background:rgba(127,127,127,0.15);display:flex;align-items:center;justify-content:center;font-size:15px;">📄</div>';
+    return '<span style="position:relative;display:inline-block;margin:0 10px 6px 0;">'
+      + '<a href="' + escAttr(rec.file_url) + '" target="_blank" title="' + escAttr(rec.file_name || 'Receipt') + '">' + thumb + '</a>'
+      + '<button type="button" class="btn-remove-row" style="position:absolute;top:-9px;right:-9px;font-size:16px;line-height:1;font-weight:700;padding:0;width:16px;height:16px;" title="Remove receipt" onclick="texRemoveReceiptForCategory(\'' + rec.id + '\')">&times;</button>'
+      + '</span>';
+  }).join('');
+  return '<div style="display:flex;align-items:center;flex-wrap:wrap;">'
+    + thumbsHtml
+    + '<input type="file" accept="image/*,.pdf" style="display:none;" id="tex-receipt-input-' + category + '" onchange="texUploadReceiptForCategory(\'' + category + '\', this.files)">'
+    + '<button type="button" class="btn-cancel" style="padding:3px 10px;font-size:12px;margin:0 0 6px;" onclick="document.getElementById(\'tex-receipt-input-' + category + '\').click()">Upload</button>'
+    + '</div>';
 }
 
 function texFormHtml(row){
@@ -1276,21 +1379,10 @@ function texFormHtml(row){
     + '<div class="info-box"><div class="info-label">Per Diem Meals Total</div><div class="info-val" id="tex-calc-perdiem">$0.00</div></div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Actual Costs (receipt-backed)</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
-    + '<div><label class="field-label" for="tex-airfare">Airfare</label><input type="number" step="0.01" class="field-input" id="tex-airfare" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-parking-transport">Airport Parking / Transport</label><input type="number" step="0.01" class="field-input" id="tex-parking-transport" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-baggage">Baggage</label><input type="number" step="0.01" class="field-input" id="tex-baggage" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-lodging-total">Lodging (actual total)</label><input type="number" step="0.01" class="field-input" id="tex-lodging-total" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-rental-car">Rental Car / Gas / Parking / Tolls</label><input type="number" step="0.01" class="field-input" id="tex-rental-car" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-mileage">Mileage</label><input type="number" step="0.01" class="field-input" id="tex-mileage" value="0" oninput="texRecalc()"></div>'
+    + texCostCategories.map(function(c){
+        return texActualCostRow(c.label, c.fieldId, c.category, 0, texEstimatedCosts[c.estimatedKey]);
+      }).join('')
     + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="tex-shipping-to">Shipping (to)</label><input type="number" step="0.01" class="field-input" id="tex-shipping-to" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-shipping-back">Shipping (back)</label><input type="number" step="0.01" class="field-input" id="tex-shipping-back" value="0" oninput="texRecalc()"></div>'
-    + '</div></div>'
-    + '<div class="resume-section"><div class="resume-section-title">Receipts</div>'
-    + (texEditingId ? '<input type="file" id="tex-receipt-input" multiple onchange="texUploadReceipts(this.files)">' : '<div class="placeholder-sub">Save as Draft first to attach receipts.</div>')
-    + '<div id="tex-receipts-list" style="margin-top:10px;"></div></div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
     + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(5,1fr);">'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="tex-total-per-traveler">$0.00</div></div>'
@@ -1315,6 +1407,7 @@ function texEstimateSelected(){
   var est = texAvailableEstimates.filter(function(e){ return e.id === id; })[0];
   if(!est){ return; }
   texLinkedEstimateTotals = { tripLead: parseFloat(est.trip_lead_total) || 0, eww: parseFloat(est.eww_total) || 0 };
+  texEstimatedCosts = texComputeEstimatedCosts(est);
   formBody.style.display = '';
   document.getElementById('tex-actual-leave-date').value = est.leave_date || '';
   document.getElementById('tex-actual-return-date').value = est.return_date || '';
@@ -1322,6 +1415,7 @@ function texEstimateSelected(){
   document.getElementById('tex-meals-rate').value = est.per_diem_meals_rate || 0;
   document.getElementById('tex-eww-rate').value = est.eww_rate || 0;
   document.getElementById('tex-eww-hours').value = est.eww_hours_per_trainer || 0;
+  texRefreshEstimatedCostDisplays();
   texRecalc();
 }
 
@@ -1433,10 +1527,13 @@ function renderTexReadOnlyDetail(r){
     + '<div class="resume-section"><div class="resume-section-title">Receipts</div><div id="tex-receipts-list"></div></div>'
     + '<div class="profile-actions"><button class="btn-cancel" onclick="loadMyExpenses()">Back</button></div>'
     + '</div>';
-  texLoadReceipts(r.id, true);
+  texLoadReceipts(r.id);
 }
 
-async function texLoadReceipts(expenseId, readOnly){
+// Read-only receipts list — used by the Supervisor/read-only detail views
+// only. The editable form uses per-category receipts instead (see
+// texLoadReceiptsByCategory/texRenderCategoryReceipts below).
+async function texLoadReceipts(expenseId){
   var listEl = document.getElementById('tex-receipts-list');
   if(!listEl){ return; }
   try{
@@ -1444,8 +1541,7 @@ async function texLoadReceipts(expenseId, readOnly){
     rows = rows || [];
     if(!rows.length){ listEl.innerHTML = '<div class="tk-empty">No receipts attached yet.</div>'; return; }
     listEl.innerHTML = rows.map(function(rec){
-      var removeBtn = readOnly ? '' : ' <button type="button" class="btn-remove-row" style="display:inline;margin-top:0;" onclick="texRemoveReceipt(\'' + rec.id + '\')">Remove</button>';
-      return '<div class="resume-cart-item"><a href="' + rec.file_url + '" target="_blank">' + escAttr(rec.file_name || 'Receipt') + '</a>' + removeBtn + '</div>';
+      return '<div class="resume-cart-item"><a href="' + rec.file_url + '" target="_blank">' + escAttr(rec.file_name || 'Receipt') + '</a></div>';
     }).join('');
   }catch(e){
     listEl.innerHTML = '<div class="tk-empty">Couldn\'t load receipts.</div>';
@@ -1453,58 +1549,11 @@ async function texLoadReceipts(expenseId, readOnly){
   }
 }
 
-async function texUploadReceipts(files){
-  if(!texEditingId || !files || !files.length){ return; }
-  var errorEl = document.getElementById('tex-form-error');
-  for(var i = 0; i < files.length; i++){
-    var file = files[i];
-    var path = texEditingId + '/' + Date.now() + '-' + file.name;
-    try{
-      var { error: upErr } = await supabaseClient.storage.from('travel-receipts').upload(path, file);
-      if(upErr){ throw upErr; }
-      var { data: pub } = supabaseClient.storage.from('travel-receipts').getPublicUrl(path);
-      var { error: insErr } = await supabaseClient.from('travel_expense_receipts').insert({
-        expense_id: texEditingId, file_url: pub.publicUrl, file_name: file.name, uploaded_by: travel.employeeId
-      });
-      if(insErr){ throw insErr; }
-    }catch(e){
-      errorEl.textContent = 'Couldn\'t upload ' + file.name + '. Try again.';
-      console.error(e);
-    }
-  }
-  document.getElementById('tex-receipt-input').value = '';
-  texLoadReceipts(texEditingId, false);
-}
-
-async function texRemoveReceipt(receiptId){
-  try{
-    var { data: rec } = await supabaseClient.from('travel_expense_receipts').select('file_url').eq('id', receiptId).limit(1);
-    await supabaseClient.from('travel_expense_receipts').delete().eq('id', receiptId);
-    if(rec && rec.length){
-      var marker = '/storage/v1/object/public/travel-receipts/';
-      var idx = rec[0].file_url.indexOf(marker);
-      if(idx !== -1){
-        var path = rec[0].file_url.slice(idx + marker.length);
-        await supabaseClient.storage.from('travel-receipts').remove([path]);
-      }
-    }
-    texLoadReceipts(texEditingId, false);
-  }catch(e){ console.error(e); }
-}
-
-async function submitTravelExpense(targetStatus){
-  var errorEl = document.getElementById('tex-form-error');
-  errorEl.textContent = '';
-
-  var estimateId = texEditingRow ? texEditingRow.estimate_id : (document.getElementById('tex-estimate-select') ? document.getElementById('tex-estimate-select').value : '');
-  if(!estimateId){ errorEl.textContent = 'Select an authorized estimate first.'; return; }
-
-  var inputs = texReadFormInputs();
-  if(targetStatus === 'submitted'){
-    if(!inputs.leaveDate || !inputs.returnDate){ errorEl.textContent = 'Actual leave and return dates are required to submit.'; return; }
-    if(new Date(inputs.returnDate) < new Date(inputs.leaveDate)){ errorEl.textContent = 'Actual return date must be on or after leave date.'; return; }
-  }
-
+// Shared by submitTravelExpense and texEnsureDraftId (silent auto-save when
+// attaching a receipt before the user has explicitly saved) so both build
+// the travel_expenses row the same way. Mirrors the Travel Estimate side's
+// teBuildBody pattern.
+function texBuildBody(targetStatus, inputs, estimateId){
   var calc = texCalc(inputs);
   var grand = calc.tripLeadTotal + calc.ewwTotal;
   var estimateGrand = texLinkedEstimateTotals.tripLead + texLinkedEstimateTotals.eww;
@@ -1521,6 +1570,128 @@ async function submitTravelExpense(targetStatus){
     variance_total: grand - estimateGrand, current_status: targetStatus
   };
   if(targetStatus === 'submitted'){ body.supervisor_status = 'pending'; }
+  return body;
+}
+
+// Silently creates a draft travel_expenses row from the form's current
+// values, without resetting/reloading the form, so a receipt can be
+// attached before the user has explicitly clicked Save as Draft. No-op
+// (returns the existing id) if the expense report is already saved.
+// Mirrors the Travel Estimate side's teEnsureDraftId.
+async function texEnsureDraftId(){
+  if(texEditingId){ return texEditingId; }
+  var estimateId = texEditingRow ? texEditingRow.estimate_id : (document.getElementById('tex-estimate-select') ? document.getElementById('tex-estimate-select').value : '');
+  if(!estimateId){ return null; }
+  var inputs = texReadFormInputs();
+  var body = texBuildBody('draft', inputs, estimateId);
+  try{
+    body.created_by = travel.employeeId;
+    var { data: inserted, error } = await supabaseClient.from('travel_expenses').insert(body).select('id').single();
+    if(error){ throw error; }
+    texEditingId = inserted.id;
+    await supabaseClient.from('travel_expense_audit_log').insert({
+      expense_id: texEditingId, changed_by: currentProfile.id, action: 'edit', previous_status: null, new_status: 'draft'
+    });
+    return texEditingId;
+  }catch(e){
+    console.error(e);
+    return null;
+  }
+}
+
+// ---------- Per-category receipts (editable-form path only) ----------
+// The read-only detail view (renderTexReadOnlyDetail) and Supervisor's
+// openExpenseApproval still use the flat texLoadReceipts/#tex-receipts-list
+// above — untouched. These are only called from the editable Actual Costs
+// rows (texActualCostRow / texRenderCategoryReceipts).
+
+async function texLoadReceiptsByCategory(expenseId){
+  texReceiptsByCategory = {};
+  if(!expenseId){ return texReceiptsByCategory; }
+  try{
+    var { data: rows } = await supabaseClient.from('travel_expense_receipts').select('*').eq('expense_id', expenseId).order('uploaded_at');
+    (rows || []).forEach(function(rec){
+      var cat = rec.category || 'other';
+      if(!texReceiptsByCategory[cat]){ texReceiptsByCategory[cat] = []; }
+      texReceiptsByCategory[cat].push(rec);
+    });
+  }catch(e){
+    console.error(e);
+  }
+  return texReceiptsByCategory;
+}
+
+async function texUploadReceiptForCategory(category, files){
+  if(!files || !files.length){ return; }
+  var errorEl = document.getElementById('tex-form-error');
+  var expenseId = await texEnsureDraftId();
+  if(!expenseId){
+    if(errorEl){ errorEl.textContent = 'Select an authorized estimate before attaching receipts.'; }
+    return;
+  }
+  for(var i = 0; i < files.length; i++){
+    var file = files[i];
+    var path = expenseId + '/' + Date.now() + '-' + file.name;
+    try{
+      var { error: upErr } = await supabaseClient.storage.from('travel-receipts').upload(path, file);
+      if(upErr){ throw upErr; }
+      var { data: pub } = supabaseClient.storage.from('travel-receipts').getPublicUrl(path);
+      var { error: insErr } = await supabaseClient.from('travel_expense_receipts').insert({
+        expense_id: expenseId, file_url: pub.publicUrl, file_name: file.name, uploaded_by: travel.employeeId, category: category
+      });
+      if(insErr){ throw insErr; }
+    }catch(e){
+      if(errorEl){ errorEl.textContent = 'Couldn\'t upload ' + file.name + '. Try again.'; }
+      console.error(e);
+    }
+  }
+  var input = document.getElementById('tex-receipt-input-' + category);
+  if(input){ input.value = ''; }
+  await texLoadReceiptsByCategory(expenseId);
+  var cell = document.getElementById('tex-receipts-cell-' + category);
+  if(cell){ cell.innerHTML = texRenderCategoryReceipts(category); }
+}
+
+async function texRemoveReceiptForCategory(receiptId){
+  var errorEl = document.getElementById('tex-form-error');
+  try{
+    var { data: rec } = await supabaseClient.from('travel_expense_receipts').select('file_url,category').eq('id', receiptId).limit(1);
+    var { error: delErr } = await supabaseClient.from('travel_expense_receipts').delete().eq('id', receiptId);
+    if(delErr){ throw delErr; }
+    var category = rec && rec.length ? rec[0].category : null;
+    if(rec && rec.length){
+      var marker = '/storage/v1/object/public/travel-receipts/';
+      var idx = rec[0].file_url.indexOf(marker);
+      if(idx !== -1){
+        var path = rec[0].file_url.slice(idx + marker.length);
+        await supabaseClient.storage.from('travel-receipts').remove([path]);
+      }
+    }
+    if(texEditingId){ await texLoadReceiptsByCategory(texEditingId); }
+    if(category){
+      var cell = document.getElementById('tex-receipts-cell-' + category);
+      if(cell){ cell.innerHTML = texRenderCategoryReceipts(category); }
+    }
+  }catch(e){
+    if(errorEl){ errorEl.textContent = 'Couldn\'t remove receipt. Try again.'; }
+    console.error(e);
+  }
+}
+
+async function submitTravelExpense(targetStatus){
+  var errorEl = document.getElementById('tex-form-error');
+  errorEl.textContent = '';
+
+  var estimateId = texEditingRow ? texEditingRow.estimate_id : (document.getElementById('tex-estimate-select') ? document.getElementById('tex-estimate-select').value : '');
+  if(!estimateId){ errorEl.textContent = 'Select an authorized estimate first.'; return; }
+
+  var inputs = texReadFormInputs();
+  if(targetStatus === 'submitted'){
+    if(!inputs.leaveDate || !inputs.returnDate){ errorEl.textContent = 'Actual leave and return dates are required to submit.'; return; }
+    if(new Date(inputs.returnDate) < new Date(inputs.leaveDate)){ errorEl.textContent = 'Actual return date must be on or after leave date.'; return; }
+  }
+
+  var body = texBuildBody(targetStatus, inputs, estimateId);
 
   try{
     var previousStatus = texEditingRow ? texEditingRow.current_status : null;

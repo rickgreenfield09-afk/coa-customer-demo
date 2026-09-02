@@ -169,7 +169,8 @@ async function loadMyEstimates(editId){
 
     var readOnlyStatuses = ['approved', 'expensed', 'paid', 'supervisor_approved'];
     if(teEditingRow && readOnlyStatuses.indexOf(teEditingRow.status) !== -1){
-      content.innerHTML = '<div id="te-detail-wrap"></div><div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
+      var lists1 = await teRenderMyEstimatesLists();
+      content.innerHTML = lists1.pendingHtml + '<div id="te-detail-wrap"></div>' + lists1.paidHtml;
       renderTeReadOnlyDetail(teEditingRow);
       return;
     }
@@ -187,7 +188,8 @@ async function loadMyEstimates(editId){
     }
 
     await teLoadTravelers();
-    content.innerHTML = teFormHtml(teEditingRow, teRejectionNote) + '<div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
+    var lists2 = await teRenderMyEstimatesLists();
+    content.innerHTML = lists2.pendingHtml + teFormHtml(teEditingRow, teRejectionNote) + lists2.paidHtml;
     if(teEditingRow){ tePrefillForm(teEditingRow); }
     await teLoadLodgingQuotes();
     teRecalc();
@@ -545,21 +547,39 @@ function teRecalc(){
   return calc;
 }
 
-async function teRenderMyEstimatesTable(){
+function teEstimatesTableRowsHtml(rows){
+  return rows.map(function(r){
+    var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
+    var actionLabel = r.status === 'draft' ? 'Edit Draft' : (r.status === 'returned' || r.status === 'denied') ? 'Edit & Resubmit' : 'View';
+    var action = '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">' + actionLabel + '</button>';
+    return '<tr><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
+      + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td>'
+      + '<td><span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></td>'
+      + '<td>$' + grand.toFixed(2) + '</td><td>' + action + '</td></tr>';
+  }).join('');
+}
+
+function teEstimatesCardHtml(title, rows, emptyMessage){
+  var body = rows.length
+    ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Destination / Event</th><th>Dates</th><th>Status</th><th>Grand Total</th><th></th></tr></thead><tbody>'
+      + teEstimatesTableRowsHtml(rows) + '</tbody></table></div>'
+    : '<div class="tk-empty">' + escAttr(emptyMessage) + '</div>';
+  return '<div class="tk-entry-card"><div class="tk-section-title">' + escAttr(title) + '</div>' + body + '</div>';
+}
+
+// Only a fully-paid estimate is "done" — everything else (draft, awaiting
+// approval/authorization at any stage, expensed-but-not-yet-paid, or
+// kicked back) is still something the employee needs to act on or watch,
+// so it lives in the Pending card at the top instead of the archive below.
+async function teRenderMyEstimatesLists(){
   var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,status,trip_lead_total,eww_total').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
   rows = rows || [];
-  if(!rows.length){ return '<div class="tk-empty">No travel estimates yet.</div>'; }
-  return '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Destination / Event</th><th>Dates</th><th>Status</th><th>Grand Total</th><th></th></tr></thead><tbody>'
-    + rows.map(function(r){
-        var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
-        var actionLabel = r.status === 'draft' ? 'Edit Draft' : (r.status === 'returned' || r.status === 'denied') ? 'Edit & Resubmit' : 'View';
-        var action = '<button class="tk-now-btn" type="button" onclick="loadMyEstimates(\'' + r.id + '\')">' + actionLabel + '</button>';
-        return '<tr><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
-          + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td>'
-          + '<td><span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></td>'
-          + '<td>$' + grand.toFixed(2) + '</td><td>' + action + '</td></tr>';
-      }).join('')
-    + '</tbody></table></div>';
+  var pendingRows = rows.filter(function(r){ return r.status !== 'paid'; });
+  var paidRows = rows.filter(function(r){ return r.status === 'paid'; });
+  return {
+    pendingHtml: teEstimatesCardHtml('Pending / Returned / Denied Requests', pendingRows, 'Nothing pending.'),
+    paidHtml: teEstimatesCardHtml('Paid Travel Estimates', paidRows, 'No paid estimates yet.')
+  };
 }
 
 function renderTeReadOnlyDetail(r){
@@ -710,9 +730,14 @@ async function submitTravelEstimate(targetStatus){
 
     teEditingId = null; teEditingRow = null; teFormDirty = false;
     await loadMyEstimates();
-    showToast(targetStatus === 'submitted' ? 'Travel estimate submitted.' : 'Draft saved.');
     var screenEl = document.getElementById('screen-travel');
     if(screenEl){ screenEl.scrollTo({ top: 0, behavior: 'smooth' }); }
+    // Show the toast after the scroll finishes, not simultaneously — it's
+    // pinned to the top of the screen, so popping it up before the scroll
+    // completes means it briefly overlaps content moving up underneath it.
+    setTimeout(function(){
+      showToast(targetStatus === 'submitted' ? 'Travel estimate submitted.' : 'Draft saved.');
+    }, 450);
   }catch(e){
     errorEl.textContent = 'Couldn\'t save travel estimate. Try again.';
     console.error(e);

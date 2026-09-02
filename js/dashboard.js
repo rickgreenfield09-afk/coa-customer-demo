@@ -703,7 +703,7 @@ async function submitAddOdc(){
   if(!description || !amount){ errorEl.textContent = 'Description and amount are required.'; return; }
   try{
     var actor = await resolveOdcActor();
-    if(!actor){ errorEl.textContent = 'Select the Supervisor or Customer Admin role to add ODC commitments.'; return; }
+    if(!actor){ errorEl.textContent = 'Select the Supervisor or Prime role to add ODC commitments.'; return; }
     var { error } = await supabaseClient.from('odc_commitments').insert({
       slin_id: slinId, description: description,
       reference_number: document.getElementById('edit-odc-ref').value || null,
@@ -741,7 +741,7 @@ async function confirmCloseOdcCommitment(id){
   if(!actual){ errorEl.textContent = 'Actual amount is required.'; return; }
   try{
     var actor = await resolveOdcActor();
-    if(!actor){ errorEl.textContent = 'Select the Supervisor or Customer Admin role to close commitments.'; return; }
+    if(!actor){ errorEl.textContent = 'Select the Supervisor or Prime role to close commitments.'; return; }
     var { error } = await supabaseClient.from('odc_commitments').update({
       status: 'closed', actual_amount: Number(actual), actual_date: actualDate || new Date().toISOString().slice(0, 10),
       closed_by_employee_id: actor.employee_id,

@@ -178,7 +178,7 @@ async function odcSubmitAdd(){
   if(!slinId || !description || !amount){ errorEl.textContent = 'SLIN, description, and committed amount are required.'; return; }
   try{
     var actor = await resolveOdcActor();
-    if(!actor){ errorEl.textContent = 'Select the Supervisor or Customer Admin role to add ODC commitments.'; return; }
+    if(!actor){ errorEl.textContent = 'Select the Supervisor or Prime role to add ODC commitments.'; return; }
     var { error } = await supabaseClient.from('odc_commitments').insert({
       slin_id: slinId,
       description: description,

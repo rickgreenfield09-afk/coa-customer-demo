@@ -1045,7 +1045,7 @@ async function openEstimateApproval(estimateId){
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'
     + '<div class="profile-actions">'
-    + '<button class="btn-save" onclick="estimateApprovalAction(\'' + r.id + '\',\'supervisor_approved\')">Approve (sends to Customer for authorization)</button>'
+    + '<button class="btn-save" onclick="estimateApprovalAction(\'' + r.id + '\',\'supervisor_approved\')">Approve (sends to Prime for authorization)</button>'
     + '<button class="btn-edit" onclick="estimateApprovalAction(\'' + r.id + '\',\'returned\')">Return</button>'
     + '<button class="btn-cancel" style="color:var(--red);border-color:var(--red);" onclick="estimateApprovalAction(\'' + r.id + '\',\'denied\')">Deny</button>'
     + '<button class="btn-cancel" onclick="document.getElementById(\'travel-approval-detail\').innerHTML=\'\'">Close</button>'
@@ -1078,7 +1078,7 @@ async function estimateApprovalAction(estimateId, decision){
 
     var approvalNote = noteField ? noteField.value.trim() : '';
     if(decision === 'supervisor_approved'){
-      notifySelf('Travel estimate approved internally', '<p>Your travel estimate has been approved internally. Switch to your Customer Admin view to authorize it for the Prime.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+      notifySelf('Travel estimate approved internally', '<p>Your travel estimate has been approved internally. Switch to your Prime view to give final authorization.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
     }else{
       notifySelf('Travel estimate ' + decision, '<p>You ' + decision + ' a travel estimate' + (approvalNote ? ': ' + escAttr(approvalNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
     }

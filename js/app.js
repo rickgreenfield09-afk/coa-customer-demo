@@ -170,9 +170,14 @@ async function showRolePicker(){
   renderPersonaGrid('customer', 'persona-grid-customer');
 }
 
+// This build only offers 3 personas end-to-end: Employee, Supervisor, and
+// Prime (customer_admin's persona-picker card, renamed to "Prime" —
+// migration 0016). customer_viewer still exists in the personas table
+// (nothing depends on removing the row) but is filtered out here so it's
+// never selectable.
 function renderPersonaGrid(category, containerId){
   var container = document.getElementById(containerId);
-  var list = currentPersonas.filter(function(p){ return p.category === category; });
+  var list = currentPersonas.filter(function(p){ return p.category === category && p.slug !== 'customer_viewer'; });
   container.innerHTML = list.map(function(p){
     var selected = currentProfile && currentProfile.active_persona_id === p.id;
     return '<div class="persona-card' + (selected ? ' selected' : '') + '" onclick="selectPersona(\'' + p.id + '\')">'

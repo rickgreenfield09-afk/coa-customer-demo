@@ -467,6 +467,10 @@ function teCalc(inputs){
   var nights = (leave && ret) ? Math.round((ret - leave) / 86400000) : 0;
   if(nights < 0){ nights = 0; }
 
+  // GSA M&IE rule: the first and last calendar day of travel are each paid
+  // at 75% of the full M&IE rate; every day in between gets the full 100%.
+  // 1.5x = 0.75 (first day) + 0.75 (last day) collapsed into one combined
+  // line item, applied once regardless of trip length.
   var travelDaysCost = 1.5 * inputs.mealsRate;
   var fullDays = Math.max(nights - 1, 0);
   var fullDaysCost = fullDays * inputs.mealsRate;
@@ -1605,6 +1609,8 @@ function texCalc(inputs){
   var nights = (leave && ret) ? Math.round((ret - leave) / 86400000) : 0;
   if(nights < 0){ nights = 0; }
 
+  // GSA M&IE rule (same as teCalc's estimate-side version): first/last
+  // travel day = 75% each (the 1.5x term), every day in between = 100%.
   var perDiemMealsTotal = (1.5 * inputs.mealsRate) + (Math.max(nights - 1, 0) * inputs.mealsRate);
   var perTravelerBucket = inputs.lodgingTotal + inputs.airfare + inputs.parkingTransport + inputs.baggage;
   var perTravelerSubtotal = perDiemMealsTotal + perTravelerBucket;

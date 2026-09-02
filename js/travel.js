@@ -91,7 +91,7 @@ function travelReadOnlyField(label, value){
 }
 
 function slinOptionsHtml(selected){
-  return travel.odcSlins.map(function(s){
+  return '<option value=""' + (selected ? '' : ' selected') + '>— Select SLIN —</option>' + travel.odcSlins.map(function(s){
     return '<option value="' + s.slin_id + '"' + (s.slin_id === selected ? ' selected' : '') + '>' + escAttr(s.slin_code) + ' — ' + escAttr(s.slin_description || '') + '</option>';
   }).join('');
 }
@@ -208,7 +208,10 @@ function teRenderTravelerRows(){
   return teTravelers.map(function(t){
     var nameHtml;
     if(t.slot === 1){
-      nameHtml = travelReadOnlyField('Traveler 1 (You)', t.employeeName);
+      // Read-only, but rendered as a disabled field-input (not
+      // travelReadOnlyField's info-box) so its height/padding matches the
+      // <select> used for slots 2-4 and every row lines up.
+      nameHtml = '<div><label class="field-label">Traveler 1 (You)</label><input class="field-input" value="' + escAttr(t.employeeName || '') + '" disabled></div>';
     }else{
       var options = '<option value="">— Select employee —</option>' + roster.filter(function(e){
         return e.id === t.employeeId || chosenIds.indexOf(e.id) === -1;
@@ -217,12 +220,14 @@ function teRenderTravelerRows(){
       }).join('');
       nameHtml = '<div><label class="field-label">Traveler ' + t.slot + '</label><select class="field-input" onchange="teSelectTravelerEmployee(' + t.slot + ', this.value)">' + options + '</select></div>';
     }
-    var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" onclick="teRemoveTraveler(' + t.slot + ')">Remove</button>';
-    return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr auto;">'
+    var ewwCost = (parseFloat(t.ewwRate) || 0) * (parseFloat(t.ewwHours) || 0);
+    var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" style="font-size:20px;line-height:1;font-weight:700;" title="Remove traveler" onclick="teRemoveTraveler(' + t.slot + ')">&times;</button>';
+    return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr 1fr 32px;align-items:end;">'
       + nameHtml
       + '<div><label class="field-label">EWW Rate (per hour)</label><input type="number" step="0.01" class="field-input" value="' + t.ewwRate + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwRate\',this.value)"></div>'
       + '<div><label class="field-label">EWW Hours</label><input type="number" step="0.01" class="field-input" value="' + t.ewwHours + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwHours\',this.value)"></div>'
-      + '<div>' + removeBtn + '</div>'
+      + '<div class="info-box" style="margin-bottom:18px;"><div class="info-label">EWW Cost</div><div class="info-val">$' + ewwCost.toFixed(2) + '</div></div>'
+      + '<div style="margin-bottom:18px;">' + removeBtn + '</div>'
       + '</div>';
   }).join('');
 }
@@ -295,7 +300,7 @@ function teFormHtml(row){
     + '<div><label class="field-label" for="te-city">City</label><input class="field-input" id="te-city" placeholder="City" onchange="teMaybeAutoLookupGsa()"></div>'
     + '<div><label class="field-label" for="te-state">State</label><input class="field-input" id="te-state" placeholder="ST" maxlength="20" onchange="teMaybeAutoLookupGsa()"></div>'
     + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 264px 100px;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 343px 100px;">'
     + '<div><label class="field-label" for="te-leave-date">Leave Date</label><input type="date" class="field-input" id="te-leave-date" oninput="teRecalc();teMaybeAutoLookupGsa();"></div>'
     + '<div><label class="field-label" for="te-return-date">Return Date</label><input type="date" class="field-input" id="te-return-date" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-slin">SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
@@ -327,10 +332,13 @@ function teFormHtml(row){
     + '<button type="button" class="btn-edit" style="margin-top:8px;" id="te-lodging-quotes-btn" onclick="teOpenLodgingQuotesModal()">Upload Comparison Quotes</button></div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Flight</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
     + '<div><label class="field-label" for="te-airfare">Airfare (avg)</label><input type="number" step="0.01" class="field-input" id="te-airfare" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-baggage">Baggage</label><input type="number" step="0.01" class="field-input" id="te-baggage" value="0" oninput="teRecalc()"></div>'
+    + '</div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
     + '<div><label class="field-label" for="te-parking-transport">Airport Parking</label><input type="number" step="0.01" class="field-input" id="te-parking-transport" value="0" oninput="teRecalc()"></div>'
+    + '<div></div>'
     + '</div></div>'
     + '</div>'
     + '<div class="cfd-two-col">'
@@ -356,10 +364,16 @@ function teFormHtml(row){
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val" id="te-total-eww">$0.00</div></div>'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total (ODC + EWW)</div><div class="tk-pto-stat-val" id="te-total-grand">$0.00</div></div>'
     + '</div>'
-    + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val" id="te-total-billable-trip-lead">$0.00</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val" id="te-total-billable-grand">$0.00</div></div>'
-    + '</div></div>'
+    // Fee-multiplier/Prime-billable figures are Supervisor-facing (the
+    // internal approval/pricing view) — Employees filling out their own
+    // request don't see the markup, only their actual costs.
+    + (currentPersonaSlug() === 'supervisor'
+      ? '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
+        + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val" id="te-total-billable-trip-lead">$0.00</div></div>'
+        + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val" id="te-total-billable-grand">$0.00</div></div>'
+        + '</div>'
+      : '')
+    + '</div>'
     + '<div class="profile-actions">'
     + '<button class="btn-save" onclick="submitTravelEstimate(\'submitted\')">Submit Estimate</button>'
     + '<button class="btn-cancel" onclick="submitTravelEstimate(\'draft\')">Save as Draft</button>'
@@ -470,8 +484,10 @@ function teRecalc(){
   document.getElementById('te-total-trip-lead').textContent = '$' + calc.tripLeadInternal.toFixed(2);
   document.getElementById('te-total-eww').textContent = '$' + calc.ewwTotal.toFixed(2);
   document.getElementById('te-total-grand').textContent = '$' + (calc.tripLeadInternal + calc.ewwTotal).toFixed(2);
-  document.getElementById('te-total-billable-trip-lead').textContent = '$' + calc.billableTripLead.toFixed(2);
-  document.getElementById('te-total-billable-grand').textContent = '$' + calc.billableGrandTotal.toFixed(2);
+  var billableTripLeadEl = document.getElementById('te-total-billable-trip-lead');
+  if(billableTripLeadEl){ billableTripLeadEl.textContent = '$' + calc.billableTripLead.toFixed(2); }
+  var billableGrandEl = document.getElementById('te-total-billable-grand');
+  if(billableGrandEl){ billableGrandEl.textContent = '$' + calc.billableGrandTotal.toFixed(2); }
 
   var warningEl = document.getElementById('te-lodging-warning');
   if(warningEl){
@@ -557,7 +573,9 @@ function teBuildBody(targetStatus, inputs){
     shipping_to: inputs.shippingTo, shipping_back: inputs.shippingBack,
     eww_rate: avgEwwRate, eww_hours_per_trainer: avgEwwHours,
     per_traveler_subtotal: calc.perTravelerInternal, trip_lead_total: calc.tripLeadInternal,
-    estimated_total_odc: calc.tripLeadInternal, eww_total: calc.ewwTotal, status: targetStatus
+    estimated_total_odc: calc.tripLeadInternal, eww_total: calc.ewwTotal,
+    billable_trip_lead_total: calc.billableTripLead, billable_grand_total: calc.billableGrandTotal,
+    status: targetStatus
   };
   if(targetStatus === 'submitted'){ body.fee_multiplier_used = travel.feeMultiplier; }
   return { body: body, city: city, state: state, slinId: slinId };
@@ -866,6 +884,8 @@ async function openEstimateApproval(estimateId){
     + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.trip_lead_total) || 0).toFixed(2))
     + travelReadOnlyField('EWW Total', '$' + (parseFloat(r.eww_total) || 0).toFixed(2))
     + travelReadOnlyField('Grand Total', '$' + grand.toFixed(2))
+    + travelReadOnlyField('Billable to Prime (ODC)', '$' + (parseFloat(r.billable_trip_lead_total) || 0).toFixed(2))
+    + travelReadOnlyField('Grand Total to Prime', '$' + (parseFloat(r.billable_grand_total) || 0).toFixed(2))
     + '</div>'
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'

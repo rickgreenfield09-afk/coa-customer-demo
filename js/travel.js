@@ -24,6 +24,24 @@ var travel = {
   subtab: ''
 };
 
+// 50 states + DC — feeds the State field's <datalist> (type-to-filter,
+// stores the 2-letter abbreviation the GSA lookup expects).
+var teUsStates = [
+  {abbr:'AL',name:'Alabama'},{abbr:'AK',name:'Alaska'},{abbr:'AZ',name:'Arizona'},{abbr:'AR',name:'Arkansas'},
+  {abbr:'CA',name:'California'},{abbr:'CO',name:'Colorado'},{abbr:'CT',name:'Connecticut'},{abbr:'DE',name:'Delaware'},
+  {abbr:'DC',name:'District of Columbia'},{abbr:'FL',name:'Florida'},{abbr:'GA',name:'Georgia'},{abbr:'HI',name:'Hawaii'},
+  {abbr:'ID',name:'Idaho'},{abbr:'IL',name:'Illinois'},{abbr:'IN',name:'Indiana'},{abbr:'IA',name:'Iowa'},
+  {abbr:'KS',name:'Kansas'},{abbr:'KY',name:'Kentucky'},{abbr:'LA',name:'Louisiana'},{abbr:'ME',name:'Maine'},
+  {abbr:'MD',name:'Maryland'},{abbr:'MA',name:'Massachusetts'},{abbr:'MI',name:'Michigan'},{abbr:'MN',name:'Minnesota'},
+  {abbr:'MS',name:'Mississippi'},{abbr:'MO',name:'Missouri'},{abbr:'MT',name:'Montana'},{abbr:'NE',name:'Nebraska'},
+  {abbr:'NV',name:'Nevada'},{abbr:'NH',name:'New Hampshire'},{abbr:'NJ',name:'New Jersey'},{abbr:'NM',name:'New Mexico'},
+  {abbr:'NY',name:'New York'},{abbr:'NC',name:'North Carolina'},{abbr:'ND',name:'North Dakota'},{abbr:'OH',name:'Ohio'},
+  {abbr:'OK',name:'Oklahoma'},{abbr:'OR',name:'Oregon'},{abbr:'PA',name:'Pennsylvania'},{abbr:'RI',name:'Rhode Island'},
+  {abbr:'SC',name:'South Carolina'},{abbr:'SD',name:'South Dakota'},{abbr:'TN',name:'Tennessee'},{abbr:'TX',name:'Texas'},
+  {abbr:'UT',name:'Utah'},{abbr:'VT',name:'Vermont'},{abbr:'VA',name:'Virginia'},{abbr:'WA',name:'Washington'},
+  {abbr:'WV',name:'West Virginia'},{abbr:'WI',name:'Wisconsin'},{abbr:'WY',name:'Wyoming'}
+];
+
 async function loadTravelScreen(){
   var newPersona = currentPersonaSlug();
   if(newPersona !== travel.persona){
@@ -221,13 +239,13 @@ function teRenderTravelerRows(){
       nameHtml = '<div><label class="field-label">Traveler ' + t.slot + '</label><select class="field-input" onchange="teSelectTravelerEmployee(' + t.slot + ', this.value)">' + options + '</select></div>';
     }
     var ewwCost = (parseFloat(t.ewwRate) || 0) * (parseFloat(t.ewwHours) || 0);
-    var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" style="font-size:20px;line-height:1;font-weight:700;" title="Remove traveler" onclick="teRemoveTraveler(' + t.slot + ')">&times;</button>';
+    var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" style="font-size:40px;line-height:1;font-weight:700;" title="Remove traveler" onclick="teRemoveTraveler(' + t.slot + ')">&times;</button>';
     return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr 1fr 32px;align-items:end;">'
       + nameHtml
       + '<div><label class="field-label">EWW Rate (per hour)</label><input type="number" step="0.01" class="field-input" value="' + t.ewwRate + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwRate\',this.value)"></div>'
       + '<div><label class="field-label">EWW Hours</label><input type="number" step="0.01" class="field-input" value="' + t.ewwHours + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwHours\',this.value)"></div>'
-      + '<div class="info-box" style="margin-bottom:18px;"><div class="info-label">EWW Cost</div><div class="info-val">$' + ewwCost.toFixed(2) + '</div></div>'
-      + '<div style="margin-bottom:18px;">' + removeBtn + '</div>'
+      + '<div class="info-box"><div class="info-label">EWW Cost</div><div class="info-val">$' + ewwCost.toFixed(2) + '</div></div>'
+      + '<div style="align-self:stretch;display:flex;align-items:center;justify-content:center;">' + removeBtn + '</div>'
       + '</div>';
   }).join('');
 }
@@ -295,15 +313,17 @@ async function teSaveTravelers(estimateId){
 function teFormHtml(row){
   return '<div class="tk-entry-card" id="te-estimate-form">'
     + '<div class="tk-section-title">' + (row ? 'Edit Draft Travel Estimate' : 'New Travel Estimate') + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1.3fr 70px;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 90px 343px;">'
     + '<div><label class="field-label" for="te-event-name">Event Name</label><input class="field-input" id="te-event-name" placeholder="Event name"></div>'
     + '<div><label class="field-label" for="te-city">City</label><input class="field-input" id="te-city" placeholder="City" onchange="teMaybeAutoLookupGsa()"></div>'
-    + '<div><label class="field-label" for="te-state">State</label><input class="field-input" id="te-state" placeholder="ST" maxlength="20" onchange="teMaybeAutoLookupGsa()"></div>'
+    + '<div><label class="field-label" for="te-state">State</label><input class="field-input" id="te-state" list="te-state-list" placeholder="ST" autocomplete="off" onchange="teMaybeAutoLookupGsa()"><datalist id="te-state-list">'
+    + teUsStates.map(function(s){ return '<option value="' + s.abbr + '">' + s.name + '</option>'; }).join('')
+    + '</datalist></div>'
+    + '<div><label class="field-label" for="te-slin">SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
     + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 343px 100px;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 100px;">'
     + '<div><label class="field-label" for="te-leave-date">Leave Date</label><input type="date" class="field-input" id="te-leave-date" oninput="teRecalc();teMaybeAutoLookupGsa();"></div>'
     + '<div><label class="field-label" for="te-return-date">Return Date</label><input type="date" class="field-input" id="te-return-date" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-slin">SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
     + '<div><label class="field-label" for="te-trainers">Trainers</label><select class="field-input" id="te-trainers" onchange="teSetTrainerCount(this.value);teRecalc();">'
     + [1, 2, 3, 4].map(function(n){ return '<option value="' + n + '"' + (n === teTravelers.length ? ' selected' : '') + '>' + n + '</option>'; }).join('')
     + '</select></div>'

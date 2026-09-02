@@ -1201,7 +1201,7 @@ var texLinkedEstimateTotals = { tripLead: 0, eww: 0 };
 // from the linked travel_estimates row via texComputeEstimatedCosts — see
 // that function for the field mapping (direct 1:1s, the 5-field
 // transportation sum, and the lodging nights*rate+fees+taxes calc).
-var texEstimatedCosts = { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTotal: 0, rentalCar: 0, mileage: 0, shippingTo: 0, shippingBack: 0 };
+var texEstimatedCosts = { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTotal: 0, rentalCar: 0, fuelGas: 0, parking: 0, tolls: 0, rideshare: 0, mileage: 0, shippingTo: 0, shippingBack: 0 };
 
 // Receipts for the currently-open expense, grouped by category (migration
 // 0017 added travel_expense_receipts.category). Populated by
@@ -1215,49 +1215,54 @@ var texVarianceNotes = {};
 
 // One row per Actual Costs category — drives both texActualCostRow's
 // repeated markup and texEstimatedCosts' key names.
+// `column` = the travel_expenses column this category's actual-cost input
+// saves to — drives texPrefillForm/texReadFormInputs/texBuildBody generically
+// so adding/removing a category doesn't require touching those in 3 places.
 var texCostCategories = [
-  { label: 'Airfare', fieldId: 'tex-airfare', category: 'airfare', estimatedKey: 'airfare' },
-  { label: 'Airport Parking / Transport', fieldId: 'tex-parking-transport', category: 'airport_parking', estimatedKey: 'parkingTransport' },
-  { label: 'Baggage', fieldId: 'tex-baggage', category: 'baggage', estimatedKey: 'baggage' },
-  { label: 'Lodging (actual total)', fieldId: 'tex-lodging-total', category: 'lodging', estimatedKey: 'lodgingTotal' },
-  { label: 'Rental Car / Gas / Parking / Tolls', fieldId: 'tex-rental-car', category: 'rental_car', estimatedKey: 'rentalCar' },
-  { label: 'Mileage', fieldId: 'tex-mileage', category: 'mileage', estimatedKey: 'mileage' },
-  { label: 'Shipping (to)', fieldId: 'tex-shipping-to', category: 'shipping_to', estimatedKey: 'shippingTo' },
-  { label: 'Shipping (back)', fieldId: 'tex-shipping-back', category: 'shipping_back', estimatedKey: 'shippingBack' }
+  { label: 'Airfare', fieldId: 'tex-airfare', category: 'airfare', estimatedKey: 'airfare', column: 'actual_airfare' },
+  { label: 'Airport Parking', fieldId: 'tex-parking-transport', category: 'airport_parking', estimatedKey: 'parkingTransport', column: 'actual_airport_parking_transport' },
+  { label: 'Baggage', fieldId: 'tex-baggage', category: 'baggage', estimatedKey: 'baggage', column: 'actual_baggage' },
+  { label: 'Lodging (actual total)', fieldId: 'tex-lodging-total', category: 'lodging', estimatedKey: 'lodgingTotal', column: 'actual_lodging_total' },
+  { label: 'Rental Car', fieldId: 'tex-rental-car', category: 'rental_car', estimatedKey: 'rentalCar', column: 'actual_rental_car' },
+  { label: 'Gas', fieldId: 'tex-fuel-gas', category: 'fuel_gas', estimatedKey: 'fuelGas', column: 'actual_fuel_gas' },
+  { label: 'Parking', fieldId: 'tex-parking', category: 'parking', estimatedKey: 'parking', column: 'actual_parking' },
+  { label: 'Tolls', fieldId: 'tex-tolls', category: 'tolls', estimatedKey: 'tolls', column: 'actual_tolls' },
+  { label: 'Rideshare', fieldId: 'tex-rideshare', category: 'rideshare', estimatedKey: 'rideshare', column: 'actual_rideshare' },
+  { label: 'Mileage', fieldId: 'tex-mileage', category: 'mileage', estimatedKey: 'mileage', column: 'actual_mileage' },
+  { label: 'Shipping (to)', fieldId: 'tex-shipping-to', category: 'shipping_to', estimatedKey: 'shippingTo', column: 'actual_shipping_to' },
+  { label: 'Shipping (back)', fieldId: 'tex-shipping-back', category: 'shipping_back', estimatedKey: 'shippingBack', column: 'actual_shipping_back' }
 ];
 
 // Shared by loadMyExpenses (editing an existing report) and
 // texEstimateSelected (picking an estimate for a new report) so both derive
-// the 8 "estimated" comparison values from a travel_estimates row the same
+// the "estimated" comparison values from a travel_estimates row the same
 // way. Lodging is nights * cost-per-night + fees + taxes; the transportation
-// bucket sums all 5 estimate-side split fields into one comparable total
-// against the expense side's single combined field.
+// bucket is now a direct 1:1 per category (migration 0019 split the actual
+// side to match the estimate side's already-separate rental_car/fuel_gas/
+// parking/tolls/rideshare_estimate fields).
 function texComputeEstimatedCosts(est){
-  if(!est){ return { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTotal: 0, rentalCar: 0, mileage: 0, shippingTo: 0, shippingBack: 0 }; }
+  if(!est){ return { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTotal: 0, rentalCar: 0, fuelGas: 0, parking: 0, tolls: 0, rideshare: 0, mileage: 0, shippingTo: 0, shippingBack: 0 }; }
   var leave = est.leave_date ? new Date(est.leave_date) : null;
   var ret = est.return_date ? new Date(est.return_date) : null;
   var nights = (leave && ret) ? Math.round((ret - leave) / 86400000) : 0;
   if(nights < 0){ nights = 0; }
   var lodgingTotal = (nights * (parseFloat(est.lodging_cost_per_night) || 0)) + (parseFloat(est.lodging_fees) || 0) + (parseFloat(est.lodging_taxes) || 0);
-  var rentalCar = (parseFloat(est.rental_car) || 0) + (parseFloat(est.fuel_gas) || 0) + (parseFloat(est.parking) || 0) + (parseFloat(est.tolls) || 0) + (parseFloat(est.rideshare_estimate) || 0);
   return {
     airfare: parseFloat(est.airfare_avg) || 0,
     parkingTransport: parseFloat(est.airport_parking_transport) || 0,
     baggage: parseFloat(est.baggage) || 0,
     lodgingTotal: lodgingTotal,
-    rentalCar: rentalCar,
+    rentalCar: parseFloat(est.rental_car) || 0,
+    fuelGas: parseFloat(est.fuel_gas) || 0,
+    parking: parseFloat(est.parking) || 0,
+    tolls: parseFloat(est.tolls) || 0,
+    rideshare: parseFloat(est.rideshare_estimate) || 0,
     mileage: parseFloat(est.mileage) || 0,
     shippingTo: parseFloat(est.shipping_to) || 0,
     shippingBack: parseFloat(est.shipping_back) || 0
   };
 }
 
-function texRefreshEstimatedCostDisplays(){
-  texCostCategories.forEach(function(c){
-    var el = document.getElementById('tex-estimated-' + c.category);
-    if(el){ el.textContent = '$' + (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0).toFixed(2); }
-  });
-}
 
 async function loadMyExpenses(editId){
   var content = document.getElementById('travel-content');
@@ -1314,20 +1319,38 @@ async function loadMyExpenses(editId){
   }
 }
 
-// One row per Actual Costs category: actual-cost input (existing field id,
-// same oninput="texRecalc()" contract) | read-only Estimated Cost box
-// (comparison against the linked estimate, see texComputeEstimatedCosts) |
-// category-scoped receipt upload + thumbnails (see texRenderCategoryReceipts).
+// Builds the filtered, 2-column Actual Costs grid content — factored out so
+// texEstimateSelected() can rebuild it once an estimate is picked (on a NEW
+// report, texFormHtml renders this once before any estimate is selected, so
+// every category would otherwise be filtered out as "nothing estimated").
+function texActualCostsGridHtml(){
+  return texCostCategories.filter(function(c){
+    // Nothing was estimated for this category on the original request
+    // (e.g. no tolls expected) — no control group needed for it here.
+    return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) > 0;
+  }).map(function(c){
+    return texActualCostRow(c.label, c.fieldId, c.category, 0, texEstimatedCosts[c.estimatedKey]);
+  }).join('');
+}
+
+// One self-contained "cell" per Actual Costs category, meant to sit inside
+// a 2-column grid (see texFormHtml) so a variance-explanation textarea, if
+// shown, never spans past the half-page column it's rendered in. Actual
+// input + read-only Estimated box (comparison against the linked estimate,
+// see texComputeEstimatedCosts) sit side by side; Receipts and the
+// conditional variance warning stack below, both still inside this cell.
 function texActualCostRow(label, fieldId, category, actualValue, estimatedValue){
   var varianceOver = texIsVarianceOver10Pct(actualValue, estimatedValue);
-  return '<div class="tk-pto-form-grid" style="grid-template-columns:160px 140px 1fr;align-items:end;margin-bottom:6px;">'
+  return '<div style="margin-bottom:18px;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;align-items:end;">'
     + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label><input type="number" step="0.01" class="field-input" id="' + fieldId + '" value="' + (actualValue || 0) + '" oninput="texRecalc()"></div>'
-    + '<div class="info-box"><div class="info-label">Estimated</div><div class="info-val" id="tex-estimated-' + category + '">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div>'
-    + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
+    + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-estimated-' + category + '" style="margin:0;">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div></div>'
     + '</div>'
-    + '<div class="warning-box" id="tex-variance-wrap-' + category + '" style="' + (varianceOver ? '' : 'display:none;') + 'margin-bottom:14px;">'
+    + '<div style="margin-top:6px;"><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
+    + '<div class="warning-box" id="tex-variance-wrap-' + category + '" style="' + (varianceOver ? '' : 'display:none;') + 'margin-top:10px;">'
     + '<div style="width:100%;"><div class="warning-box-title">' + escAttr(label) + ' is more than 10% over the estimate</div>'
-    + '<textarea class="info-edit-input" id="tex-variance-note-' + category + '" rows="2" placeholder="Explain the variance...">' + escAttr((texVarianceNotes && texVarianceNotes[category]) || '') + '</textarea></div>'
+    + '<textarea class="info-edit-input" id="tex-variance-note-' + category + '" rows="2" placeholder="Please explain the reason for this variance...">' + escAttr((texVarianceNotes && texVarianceNotes[category]) || '') + '</textarea></div>'
+    + '</div>'
     + '</div>';
 }
 
@@ -1399,10 +1422,7 @@ function texFormHtml(row){
     + '<div class="info-box"><div class="info-label">Per Diem Meals Total</div><div class="info-val" id="tex-calc-perdiem">$0.00</div></div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Actual Costs (receipt-backed)</div>'
-    + texCostCategories.map(function(c){
-        return texActualCostRow(c.label, c.fieldId, c.category, 0, texEstimatedCosts[c.estimatedKey]);
-      }).join('')
-    + '</div>'
+    + '<div id="tex-actual-costs-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;">' + texActualCostsGridHtml() + '</div></div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
     + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(5,1fr);">'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="tex-total-per-traveler">$0.00</div></div>'
@@ -1435,7 +1455,12 @@ function texEstimateSelected(){
   document.getElementById('tex-meals-rate').value = est.per_diem_meals_rate || 0;
   document.getElementById('tex-eww-rate').value = est.eww_rate || 0;
   document.getElementById('tex-eww-hours').value = est.eww_hours_per_trainer || 0;
-  texRefreshEstimatedCostDisplays();
+  // The Actual Costs grid was first rendered before any estimate was picked
+  // (so every category was filtered out) — rebuild it now that
+  // texEstimatedCosts reflects the chosen estimate.
+  texReceiptsByCategory = {};
+  var gridEl = document.getElementById('tex-actual-costs-grid');
+  if(gridEl){ gridEl.innerHTML = texActualCostsGridHtml(); }
   texRecalc();
 }
 
@@ -1446,14 +1471,12 @@ function texPrefillForm(row){
   document.getElementById('tex-meals-rate').value = row.per_diem_meals_rate || 0;
   document.getElementById('tex-eww-rate').value = row.eww_rate || 0;
   document.getElementById('tex-eww-hours').value = row.eww_hours_per_trainer || 0;
-  document.getElementById('tex-airfare').value = row.actual_airfare || 0;
-  document.getElementById('tex-parking-transport').value = row.actual_airport_parking_transport || 0;
-  document.getElementById('tex-baggage').value = row.actual_baggage || 0;
-  document.getElementById('tex-lodging-total').value = row.actual_lodging_total || 0;
-  document.getElementById('tex-rental-car').value = row.actual_rental_car_gas_parking_tolls || 0;
-  document.getElementById('tex-mileage').value = row.actual_mileage || 0;
-  document.getElementById('tex-shipping-to').value = row.actual_shipping_to || 0;
-  document.getElementById('tex-shipping-back').value = row.actual_shipping_back || 0;
+  // Categories with nothing estimated aren't rendered (texFormHtml filters
+  // them out), so guard each lookup — a hidden category's field won't exist.
+  texCostCategories.forEach(function(c){
+    var el = document.getElementById(c.fieldId);
+    if(el){ el.value = row[c.column] || 0; }
+  });
 }
 
 function texCalc(inputs){
@@ -1465,7 +1488,7 @@ function texCalc(inputs){
   var perDiemMealsTotal = (1.5 * inputs.mealsRate) + (Math.max(nights - 1, 0) * inputs.mealsRate);
   var perTravelerBucket = inputs.lodgingTotal + inputs.airfare + inputs.parkingTransport + inputs.baggage;
   var perTravelerSubtotal = perDiemMealsTotal + perTravelerBucket;
-  var tripLevelBucket = inputs.rentalCar + inputs.mileage + inputs.shippingTo + inputs.shippingBack;
+  var tripLevelBucket = inputs.rentalCar + inputs.fuelGas + inputs.parking + inputs.tolls + inputs.rideshare + inputs.mileage + inputs.shippingTo + inputs.shippingBack;
   var tripLeadTotal = (perTravelerSubtotal * inputs.trainers) + tripLevelBucket;
   var ewwTotal = inputs.ewwRate * inputs.ewwHours * inputs.trainers;
 
@@ -1473,22 +1496,21 @@ function texCalc(inputs){
 }
 
 function texReadFormInputs(){
-  return {
+  var inputs = {
     leaveDate: document.getElementById('tex-actual-leave-date').value,
     returnDate: document.getElementById('tex-actual-return-date').value,
     trainers: parseInt(document.getElementById('tex-trainers').value, 10) || 1,
     mealsRate: parseFloat(document.getElementById('tex-meals-rate').value) || 0,
     ewwRate: parseFloat(document.getElementById('tex-eww-rate').value) || 0,
-    ewwHours: parseFloat(document.getElementById('tex-eww-hours').value) || 0,
-    airfare: parseFloat(document.getElementById('tex-airfare').value) || 0,
-    parkingTransport: parseFloat(document.getElementById('tex-parking-transport').value) || 0,
-    baggage: parseFloat(document.getElementById('tex-baggage').value) || 0,
-    lodgingTotal: parseFloat(document.getElementById('tex-lodging-total').value) || 0,
-    rentalCar: parseFloat(document.getElementById('tex-rental-car').value) || 0,
-    mileage: parseFloat(document.getElementById('tex-mileage').value) || 0,
-    shippingTo: parseFloat(document.getElementById('tex-shipping-to').value) || 0,
-    shippingBack: parseFloat(document.getElementById('tex-shipping-back').value) || 0
+    ewwHours: parseFloat(document.getElementById('tex-eww-hours').value) || 0
   };
+  // Hidden categories (nothing estimated) have no field in the DOM — read
+  // as 0, same as if the user had left it blank.
+  texCostCategories.forEach(function(c){
+    var el = document.getElementById(c.fieldId);
+    inputs[c.estimatedKey] = el ? (parseFloat(el.value) || 0) : 0;
+  });
+  return inputs;
 }
 
 function texRecalc(){
@@ -1609,14 +1631,12 @@ function texBuildBody(targetStatus, inputs, estimateId){
   var body = {
     estimate_id: estimateId, number_of_trainers: inputs.trainers,
     actual_leave_date: inputs.leaveDate || null, actual_return_date: inputs.returnDate || null,
-    actual_airfare: inputs.airfare, actual_airport_parking_transport: inputs.parkingTransport, actual_baggage: inputs.baggage,
-    actual_lodging_total: inputs.lodgingTotal, actual_rental_car_gas_parking_tolls: inputs.rentalCar, actual_mileage: inputs.mileage,
-    actual_shipping_to: inputs.shippingTo, actual_shipping_back: inputs.shippingBack,
     per_diem_meals_rate: inputs.mealsRate, eww_rate: inputs.ewwRate, eww_hours_per_trainer: inputs.ewwHours,
     actual_per_diem_meals_total: calc.perDiemMealsTotal, actual_per_traveler_subtotal: calc.perTravelerSubtotal,
     actual_trip_lead_total: calc.tripLeadTotal, actual_total_odc: calc.tripLeadTotal, actual_eww_total: calc.ewwTotal,
     variance_total: grand - estimateGrand, variance_notes: texReadVarianceNotes(), current_status: targetStatus
   };
+  texCostCategories.forEach(function(c){ body[c.column] = inputs[c.estimatedKey]; });
   if(targetStatus === 'submitted'){ body.supervisor_status = 'pending'; }
   return body;
 }

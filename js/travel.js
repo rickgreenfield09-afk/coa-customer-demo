@@ -1209,9 +1209,19 @@ var texEstimatedCosts = { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTo
 var texReceiptsByCategory = {};
 
 // Explanations for a category whose actual cost ran >10% over its estimate
-// (migration 0018 added travel_expenses.variance_notes, jsonb keyed by
-// category). Required at submit time for any category still over threshold.
+// OR that was added via "Additional Expenses" below (a cost incurred that
+// had no estimate at all) — both reuse the same jsonb column
+// (travel_expenses.variance_notes, migration 0018) since both are "explain
+// this cost category" notes tied to a category, just for different reasons.
+// Required at submit time in both cases.
 var texVarianceNotes = {};
+
+// Categories the user has manually added via "Additional Expenses" — these
+// are categories with nothing on the original estimate (texEstimatedCosts
+// is 0), so they don't appear in the main Actual Costs grid at all unless
+// added here. Populated from the saved row's non-zero, non-estimated
+// columns when reopening a draft (see loadMyExpenses).
+var texAdditionalCategories = [];
 
 // One row per Actual Costs category — drives both texActualCostRow's
 // repeated markup and texEstimatedCosts' key names.
@@ -1277,6 +1287,7 @@ async function loadMyExpenses(editId){
   texEstimatedCosts = texComputeEstimatedCosts(null);
   texReceiptsByCategory = {};
   texVarianceNotes = {};
+  texAdditionalCategories = [];
 
   try{
     if(texEditingId){
@@ -1304,6 +1315,13 @@ async function loadMyExpenses(editId){
       };
       texEstimatedCosts = texComputeEstimatedCosts(texEditingRow.travel_estimates);
       texVarianceNotes = texEditingRow.variance_notes || {};
+      // A category with nothing estimated but a saved non-zero actual cost
+      // must have been added via Additional Expenses on a previous save —
+      // bring it back so its row reappears instead of the value going
+      // invisible (still saved, just no control showing it).
+      texAdditionalCategories = texCostCategories.filter(function(c){
+        return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && (parseFloat(texEditingRow[c.column]) || 0) > 0;
+      }).map(function(c){ return c.category; });
       await texLoadReceiptsByCategory(texEditingRow.id);
     }
 
@@ -1333,6 +1351,31 @@ function texActualCostsGridHtml(){
   }).join('');
 }
 
+// ---------- Currency-formatted actual-cost inputs ----------
+// type="number" can't display "$400.00" (browsers reject non-numeric
+// characters in a number input), so these are plain text inputs with
+// inputmode="decimal" — cleared to blank on focus (instead of leaving a
+// stale "0" the user has to select and delete) and formatted as currency
+// on blur. Every place that reads one of these fields' raw value uses
+// texParseMoney instead of parseFloat so a "$400.00"-formatted value still
+// parses correctly.
+function texParseMoney(v){
+  var n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+function texCurrencyInputHtml(fieldId, value){
+  var n = texParseMoney(value);
+  return '<input type="text" inputmode="decimal" class="field-input" id="' + fieldId + '" value="$' + n.toFixed(2) + '" onfocus="texCurrencyFocus(this)" onblur="texCurrencyBlur(this)" oninput="texRecalc()">';
+}
+function texCurrencyFocus(el){
+  var n = texParseMoney(el.value);
+  el.value = n === 0 ? '' : String(n);
+}
+function texCurrencyBlur(el){
+  el.value = '$' + texParseMoney(el.value).toFixed(2);
+  texRecalc();
+}
+
 // One self-contained "cell" per Actual Costs category, meant to sit inside
 // a 2-column grid (see texFormHtml) so a variance-explanation textarea, if
 // shown, never spans past the half-page column it's rendered in. Actual
@@ -1344,7 +1387,7 @@ function texActualCostRow(label, fieldId, category, actualValue, estimatedValue)
   var varianceOver = texIsVarianceOver10Pct(actualValue, estimatedValue);
   return '<div style="margin-bottom:18px;">'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
-    + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label><input type="number" step="0.01" class="field-input" id="' + fieldId + '" value="' + (actualValue || 0) + '" oninput="texRecalc()"></div>'
+    + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label>' + texCurrencyInputHtml(fieldId, actualValue) + '</div>'
     + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-estimated-' + category + '" style="margin:0;">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div></div>'
     + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
     + '</div>'
@@ -1358,8 +1401,8 @@ function texActualCostRow(label, fieldId, category, actualValue, estimatedValue)
 // Actual > estimated by more than 10% — guards against a divide-by-zero /
 // false-positive flag when nothing was estimated for this category at all.
 function texIsVarianceOver10Pct(actualValue, estimatedValue){
-  var actual = parseFloat(actualValue) || 0;
-  var estimated = parseFloat(estimatedValue) || 0;
+  var actual = texParseMoney(actualValue);
+  var estimated = texParseMoney(estimatedValue);
   return estimated > 0 && actual > estimated * 1.1;
 }
 
@@ -1388,6 +1431,59 @@ function texRenderCategoryReceipts(category){
     + '<input type="file" accept="image/*,.pdf" style="display:none;" id="tex-receipt-input-' + category + '" onchange="texUploadReceiptForCategory(\'' + category + '\', this.files)">'
     + '<button type="button" class="btn-cancel" style="padding:3px 10px;font-size:12px;margin:0 0 6px;" onclick="document.getElementById(\'tex-receipt-input-' + category + '\').click()">Upload</button>'
     + '</div>';
+}
+
+// ---------- Additional Expenses (categories with nothing on the original
+// estimate, added ad hoc — e.g. baggage fees that came up but weren't
+// planned for). Reuses the same fieldId/category/column as the main
+// Actual Costs grid (see texCostCategories) so texReadFormInputs/
+// texBuildBody/texPrefillForm already pick these up generically — the only
+// thing specific to this section is which categories are offered (the
+// complement of what's already shown) and that the "why wasn't this
+// estimated" note is always required, not just past the 10% threshold.
+
+function texAdditionalExpensesSectionHtml(){
+  var rowsHtml = texAdditionalCategories.map(function(cat){
+    var c = texCostCategories.find(function(x){ return x.category === cat; });
+    return c ? texAdditionalExpenseRowHtml(c) : '';
+  }).join('');
+  var available = texCostCategories.filter(function(c){
+    return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && texAdditionalCategories.indexOf(c.category) === -1;
+  });
+  var addControlHtml = available.length
+    ? '<select class="field-input" id="tex-additional-category-select" style="max-width:280px;display:inline-block;" onchange="texAddAdditionalExpense(this.value)">'
+      + '<option value="">+ Add an expense category...</option>'
+      + available.map(function(c){ return '<option value="' + c.category + '">' + escAttr(c.label) + '</option>'; }).join('')
+      + '</select>'
+    : (texAdditionalCategories.length ? '' : '<div class="tk-empty">Every category is already on your estimate.</div>');
+  return rowsHtml + addControlHtml;
+}
+
+function texAdditionalExpenseRowHtml(c){
+  return '<div style="margin-bottom:18px;" id="tex-additional-row-' + c.category + '">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 32px;align-items:end;">'
+    + '<div><label class="field-label" for="' + c.fieldId + '">' + escAttr(c.label) + '</label>' + texCurrencyInputHtml(c.fieldId, 0) + '</div>'
+    + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + c.category + '">' + texRenderCategoryReceipts(c.category) + '</div></div>'
+    + '<div style="align-self:stretch;display:flex;align-items:center;justify-content:center;"><button type="button" class="btn-remove-row" style="font-size:24px;line-height:1;font-weight:700;" title="Remove this expense" onclick="texRemoveAdditionalExpense(\'' + c.category + '\')">&times;</button></div>'
+    + '</div>'
+    + '<div style="margin-top:6px;"><label class="field-label" for="tex-variance-note-' + c.category + '">Why wasn\'t this on the original estimate?</label>'
+    + '<textarea class="info-edit-input" id="tex-variance-note-' + c.category + '" rows="2" placeholder="Please explain why this wasn\'t included in the estimate...">' + escAttr((texVarianceNotes && texVarianceNotes[c.category]) || '') + '</textarea></div>'
+    + '</div>';
+}
+
+function texAddAdditionalExpense(category){
+  if(!category || texAdditionalCategories.indexOf(category) !== -1){ return; }
+  texAdditionalCategories.push(category);
+  var wrap = document.getElementById('tex-additional-expenses-wrap');
+  if(wrap){ wrap.innerHTML = texAdditionalExpensesSectionHtml(); }
+  texRecalc();
+}
+
+function texRemoveAdditionalExpense(category){
+  texAdditionalCategories = texAdditionalCategories.filter(function(c){ return c !== category; });
+  var wrap = document.getElementById('tex-additional-expenses-wrap');
+  if(wrap){ wrap.innerHTML = texAdditionalExpensesSectionHtml(); }
+  texRecalc();
 }
 
 function texFormHtml(row){
@@ -1424,6 +1520,9 @@ function texFormHtml(row){
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Actual Costs (receipt-backed)</div>'
     + '<div id="tex-actual-costs-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;">' + texActualCostsGridHtml() + '</div></div>'
+    + '<div class="resume-section"><div class="resume-section-title">Additional Expenses (Not on Original Estimate)</div>'
+    + '<div class="placeholder-sub" style="margin-bottom:10px;">Paid for something that wasn\'t in your estimate — like baggage fees you didn\'t plan for? Add it here.</div>'
+    + '<div id="tex-additional-expenses-wrap">' + texAdditionalExpensesSectionHtml() + '</div></div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
     + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(5,1fr);">'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="tex-total-per-traveler">$0.00</div></div>'
@@ -1460,8 +1559,11 @@ function texEstimateSelected(){
   // (so every category was filtered out) — rebuild it now that
   // texEstimatedCosts reflects the chosen estimate.
   texReceiptsByCategory = {};
+  texAdditionalCategories = [];
   var gridEl = document.getElementById('tex-actual-costs-grid');
   if(gridEl){ gridEl.innerHTML = texActualCostsGridHtml(); }
+  var additionalEl = document.getElementById('tex-additional-expenses-wrap');
+  if(additionalEl){ additionalEl.innerHTML = texAdditionalExpensesSectionHtml(); }
   texRecalc();
 }
 
@@ -1472,11 +1574,11 @@ function texPrefillForm(row){
   document.getElementById('tex-meals-rate').value = row.per_diem_meals_rate || 0;
   document.getElementById('tex-eww-rate').value = row.eww_rate || 0;
   document.getElementById('tex-eww-hours').value = row.eww_hours_per_trainer || 0;
-  // Categories with nothing estimated aren't rendered (texFormHtml filters
-  // them out), so guard each lookup — a hidden category's field won't exist.
+  // Categories with nothing estimated (and not added via Additional
+  // Expenses) aren't rendered, so guard each lookup.
   texCostCategories.forEach(function(c){
     var el = document.getElementById(c.fieldId);
-    if(el){ el.value = row[c.column] || 0; }
+    if(el){ el.value = '$' + (parseFloat(row[c.column]) || 0).toFixed(2); }
   });
 }
 
@@ -1509,7 +1611,7 @@ function texReadFormInputs(){
   // as 0, same as if the user had left it blank.
   texCostCategories.forEach(function(c){
     var el = document.getElementById(c.fieldId);
-    inputs[c.estimatedKey] = el ? (parseFloat(el.value) || 0) : 0;
+    inputs[c.estimatedKey] = el ? texParseMoney(el.value) : 0;
   });
   return inputs;
 }
@@ -1765,6 +1867,16 @@ async function submitTravelExpense(targetStatus){
     });
     if(missingVarianceNote){
       errorEl.textContent = 'Explain the variance for ' + missingVarianceNote.label + ' before submitting — it\'s more than 10% over the estimate.';
+      return;
+    }
+    var missingAdditionalNote = texAdditionalCategories.map(function(cat){
+      return texCostCategories.find(function(c){ return c.category === cat; });
+    }).find(function(c){
+      var noteEl = c && document.getElementById('tex-variance-note-' + c.category);
+      return c && (!noteEl || !noteEl.value.trim());
+    });
+    if(missingAdditionalNote){
+      errorEl.textContent = 'Explain why ' + missingAdditionalNote.label + ' wasn\'t on the original estimate before submitting.';
       return;
     }
   }

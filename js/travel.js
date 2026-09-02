@@ -104,6 +104,13 @@ var teEditingId = null;
 var teEditingRow = null;
 var teLodgingQuotes = [];
 
+// Up to 4 travelers per estimate (travel_estimate_travelers), each linked to
+// a real demo_employees record with its own EWW rate/hours. Slot 1 is always
+// the submitter (travel.employeeId) and can't be removed; slots 2-4 are
+// added/removed as the Trainers count changes.
+var teTravelers = [];
+var teEmployeeRoster = null;
+
 // Set true by any edit to the open New/Edit Travel Estimate form (delegated
 // listener below, scoped to #te-estimate-form), cleared on a fresh form load
 // or a successful save — app.js's navigation guards (switchScreen/Switch
@@ -148,6 +155,7 @@ async function loadMyEstimates(editId){
       return;
     }
 
+    await teLoadTravelers();
     content.innerHTML = teFormHtml(teEditingRow) + '<div class="tk-entry-card"><div class="tk-section-title">My Travel Estimates</div>' + (await teRenderMyEstimatesTable()) + '</div>';
     if(teEditingRow){ tePrefillForm(teEditingRow); }
     await teLoadLodgingQuotes();
@@ -159,20 +167,139 @@ async function loadMyEstimates(editId){
   }
 }
 
+// ---------- Per-traveler EWW roster (up to 4 travelers per estimate) ----------
+
+async function teFetchEmployeeRoster(){
+  if(teEmployeeRoster){ return teEmployeeRoster; }
+  var { data, error } = await supabaseClient.from('demo_employees').select('id,full_name').is('owner_profile_id', null).order('full_name');
+  if(error){ throw error; }
+  teEmployeeRoster = data || [];
+  return teEmployeeRoster;
+}
+
+async function teLoadTravelers(){
+  teTravelers = [];
+  try{
+    await teFetchEmployeeRoster();
+    if(teEditingId){
+      var { data: rows } = await supabaseClient.from('travel_estimate_travelers').select('*, demo_employees(full_name)').eq('estimate_id', teEditingId).order('traveler_number');
+      if(rows && rows.length){
+        teTravelers = rows.map(function(r){
+          return {
+            slot: r.traveler_number, employeeId: r.employee_id,
+            employeeName: r.demo_employees ? r.demo_employees.full_name : null,
+            ewwRate: parseFloat(r.eww_rate) || 0, ewwHours: parseFloat(r.eww_hours) || 0
+          };
+        });
+      }
+    }
+  }catch(e){
+    console.error(e);
+  }
+  if(!teTravelers.length){
+    var names = await employeeNamesById([travel.employeeId]);
+    teTravelers = [{ slot: 1, employeeId: travel.employeeId, employeeName: names[travel.employeeId] || null, ewwRate: 0, ewwHours: 0 }];
+  }
+}
+
+function teRenderTravelerRows(){
+  var roster = teEmployeeRoster || [];
+  var chosenIds = teTravelers.map(function(t){ return t.employeeId; }).filter(Boolean);
+  return teTravelers.map(function(t){
+    var nameHtml;
+    if(t.slot === 1){
+      nameHtml = travelReadOnlyField('Traveler 1 (You)', t.employeeName);
+    }else{
+      var options = '<option value="">— Select employee —</option>' + roster.filter(function(e){
+        return e.id === t.employeeId || chosenIds.indexOf(e.id) === -1;
+      }).map(function(e){
+        return '<option value="' + e.id + '"' + (e.id === t.employeeId ? ' selected' : '') + '>' + escAttr(e.full_name) + '</option>';
+      }).join('');
+      nameHtml = '<div><label class="field-label">Traveler ' + t.slot + '</label><select class="field-input" onchange="teSelectTravelerEmployee(' + t.slot + ', this.value)">' + options + '</select></div>';
+    }
+    var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" onclick="teRemoveTraveler(' + t.slot + ')">Remove</button>';
+    return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr auto;">'
+      + nameHtml
+      + '<div><label class="field-label">EWW Rate (per hour)</label><input type="number" step="0.01" class="field-input" value="' + t.ewwRate + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwRate\',this.value)"></div>'
+      + '<div><label class="field-label">EWW Hours</label><input type="number" step="0.01" class="field-input" value="' + t.ewwHours + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwHours\',this.value)"></div>'
+      + '<div>' + removeBtn + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function teRefreshTravelerRows(){
+  var wrap = document.getElementById('te-traveler-rows');
+  if(wrap){ wrap.innerHTML = teRenderTravelerRows(); }
+  teRecalc();
+}
+
+function teSetTrainerCount(n){
+  n = parseInt(n, 10) || 1;
+  if(n < 1){ n = 1; }
+  if(n > 4){ n = 4; }
+  while(teTravelers.length < n){
+    teTravelers.push({ slot: teTravelers.length + 1, employeeId: null, employeeName: null, ewwRate: 0, ewwHours: 0 });
+  }
+  if(teTravelers.length > n){ teTravelers.length = n; }
+  var trainersInput = document.getElementById('te-trainers');
+  if(trainersInput){ trainersInput.value = n; }
+  teRefreshTravelerRows();
+}
+
+function teRemoveTraveler(slot){
+  if(slot === 1){ return; }
+  teTravelers = teTravelers.filter(function(t){ return t.slot !== slot; });
+  teTravelers.forEach(function(t, i){ t.slot = i + 1; });
+  var trainersInput = document.getElementById('te-trainers');
+  if(trainersInput){ trainersInput.value = teTravelers.length; }
+  teRefreshTravelerRows();
+}
+
+function teSelectTravelerEmployee(slot, employeeId){
+  var t = teTravelers[slot - 1];
+  if(!t){ return; }
+  var emp = (teEmployeeRoster || []).find(function(e){ return e.id === employeeId; });
+  t.employeeId = employeeId || null;
+  t.employeeName = emp ? emp.full_name : null;
+  teRefreshTravelerRows();
+}
+
+function teUpdateTravelerEww(slot, field, value){
+  var t = teTravelers[slot - 1];
+  if(!t){ return; }
+  t[field] = parseFloat(value) || 0;
+  teRecalc();
+}
+
+// Persists the current teTravelers array for an estimate: delete-then-insert
+// avoids tracking which slots changed. Slots with no employee chosen yet
+// (blank slots added by bumping Trainers, not yet assigned) are skipped —
+// employee_id is NOT NULL on travel_estimate_travelers, and blank slots are
+// only allowed to exist transiently on an unsubmitted draft.
+async function teSaveTravelers(estimateId){
+  var { error: delErr } = await supabaseClient.from('travel_estimate_travelers').delete().eq('estimate_id', estimateId);
+  if(delErr){ throw delErr; }
+  var rows = teTravelers.filter(function(t){ return t.employeeId; }).map(function(t){
+    return { estimate_id: estimateId, employee_id: t.employeeId, traveler_number: t.slot, eww_rate: t.ewwRate, eww_hours: t.ewwHours };
+  });
+  if(!rows.length){ return; }
+  var { error: insErr } = await supabaseClient.from('travel_estimate_travelers').insert(rows);
+  if(insErr){ throw insErr; }
+}
+
 function teFormHtml(row){
   return '<div class="tk-entry-card" id="te-estimate-form">'
     + '<div class="tk-section-title">' + (row ? 'Edit Draft Travel Estimate' : 'New Travel Estimate') + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1.3fr 70px 1fr 100px 140px 140px;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1.3fr 70px;">'
+    + '<div><label class="field-label" for="te-event-name">Event Name</label><input class="field-input" id="te-event-name" placeholder="Event name"></div>'
     + '<div><label class="field-label" for="te-city">City</label><input class="field-input" id="te-city" placeholder="City" onchange="teMaybeAutoLookupGsa()"></div>'
     + '<div><label class="field-label" for="te-state">State</label><input class="field-input" id="te-state" placeholder="ST" maxlength="20" onchange="teMaybeAutoLookupGsa()"></div>'
-    + '<div><label class="field-label" for="te-event-name">Event Name</label><input class="field-input" id="te-event-name" placeholder="Event name"></div>'
-    + '<div><label class="field-label" for="te-trainers">Trainers</label><input type="number" min="1" step="1" class="field-input" id="te-trainers" value="1" oninput="teRecalc()"></div>'
+    + '</div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 220px 100px;">'
     + '<div><label class="field-label" for="te-leave-date">Leave Date</label><input type="date" class="field-input" id="te-leave-date" oninput="teRecalc();teMaybeAutoLookupGsa();"></div>'
     + '<div><label class="field-label" for="te-return-date">Return Date</label><input type="date" class="field-input" id="te-return-date" oninput="teRecalc()"></div>'
-    + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:220px auto;">'
-    + '<div><label class="field-label" for="te-slin">ODC / Travel SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
-    + '<div></div>'
+    + '<div><label class="field-label" for="te-slin">SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
+    + '<div><label class="field-label" for="te-trainers">Trainers</label><input type="number" min="1" max="4" step="1" class="field-input" id="te-trainers" value="' + teTravelers.length + '" oninput="teSetTrainerCount(this.value);teRecalc();"></div>'
     + '</div>'
     + '<div class="cfd-two-col">'
     + '<div class="resume-section"><div class="resume-section-title">Lodging</div>'
@@ -203,6 +330,7 @@ function teFormHtml(row){
     + '<div><label class="field-label" for="te-parking-transport">Airport Parking</label><input type="number" step="0.01" class="field-input" id="te-parking-transport" value="0" oninput="teRecalc()"></div>'
     + '</div></div>'
     + '</div>'
+    + '<div class="cfd-two-col">'
     + '<div class="resume-section"><div class="resume-section-title">Transportation</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:120px 100px 100px 100px 140px 180px;">'
     + '<div><label class="field-label" for="te-rental-car">Rental Car</label><input type="number" step="0.01" class="field-input" id="te-rental-car" value="0" oninput="teRecalc()"></div>'
@@ -211,24 +339,25 @@ function teFormHtml(row){
     + '<div><label class="field-label" for="te-tolls">Tolls</label><input type="number" step="0.01" class="field-input" id="te-tolls" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-rideshare">Rideshare Estimate</label><input type="number" step="0.01" class="field-input" id="te-rideshare" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-mileage">Mileage (Personal Vehicle)</label><input type="number" step="0.01" class="field-input" id="te-mileage" value="0" oninput="teRecalc()"></div>'
-    + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px auto;">'
+    + '</div></div>'
+    + '<div class="resume-section"><div class="resume-section-title">Other ODC Costs/EWW</div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
     + '<div><label class="field-label" for="te-shipping-to">Shipping (to)</label><input type="number" step="0.01" class="field-input" id="te-shipping-to" value="0" oninput="teRecalc()"></div>'
     + '<div><label class="field-label" for="te-shipping-back">Shipping (back)</label><input type="number" step="0.01" class="field-input" id="te-shipping-back" value="0" oninput="teRecalc()"></div>'
-    + '<div></div>'
-    + '</div></div>'
-    + '<div class="resume-section"><div class="resume-section-title">EWW (Extended Work Week)</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:160px 200px auto;">'
-    + '<div><label class="field-label" for="te-eww-rate">EWW Rate (per hour)</label><input type="number" step="0.01" class="field-input" id="te-eww-rate" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-eww-hours">EWW Hours per Trainer</label><input type="number" step="0.01" class="field-input" id="te-eww-hours" value="0" oninput="teRecalc()"></div>'
-    + '<div></div>'
-    + '</div></div>'
+    + '</div>'
+    + '<div id="te-traveler-rows">' + teRenderTravelerRows() + '</div>'
+    + '</div>'
+    + '</div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
     + '<div class="tk-pto-summary-row">'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="te-total-per-traveler">$0.00</div></div>'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val" id="te-total-trip-lead">$0.00</div></div>'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val" id="te-total-eww">$0.00</div></div>'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total (ODC + EWW)</div><div class="tk-pto-stat-val" id="te-total-grand">$0.00</div></div>'
+    + '</div>'
+    + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val" id="te-total-billable-trip-lead">$0.00</div></div>'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val" id="te-total-billable-grand">$0.00</div></div>'
     + '</div></div>'
     + '<div class="profile-actions">'
     + '<button class="btn-save" onclick="submitTravelEstimate(\'submitted\')">Submit Estimate</button>'
@@ -244,7 +373,7 @@ function tePrefillForm(row){
   document.getElementById('te-state').value = row.state || '';
   document.getElementById('te-event-name').value = row.event_name || '';
   document.getElementById('te-slin').value = row.slin_id || '';
-  document.getElementById('te-trainers').value = row.number_of_trainers || 1;
+  document.getElementById('te-trainers').value = teTravelers.length;
   document.getElementById('te-leave-date').value = row.leave_date || '';
   document.getElementById('te-return-date').value = row.return_date || '';
   document.getElementById('te-gsa-lodging-rate').value = row.per_diem_lodging_rate || 0;
@@ -263,8 +392,6 @@ function tePrefillForm(row){
   document.getElementById('te-mileage').value = row.mileage || 0;
   document.getElementById('te-shipping-to').value = row.shipping_to || 0;
   document.getElementById('te-shipping-back').value = row.shipping_back || 0;
-  document.getElementById('te-eww-rate').value = row.eww_rate || 0;
-  document.getElementById('te-eww-hours').value = row.eww_hours_per_trainer || 0;
 }
 
 // Travel days = 1.5x M&IE ONCE; full days (nights-1) = 1x M&IE each.
@@ -287,11 +414,20 @@ function teCalc(inputs){
 
   var perTravelerInternal = perDiemMealsTotal + perTravelerMarkupBucket;
   var tripLeadInternal = (perTravelerInternal * inputs.trainers) + tripLevelBucket;
-  var ewwTotal = inputs.ewwRate * inputs.ewwHours * inputs.trainers;
+  // Per-traveler EWW: sum of each traveler's own rate*hours (matches the
+  // reference spreadsheet), not one shared rate/hours times headcount.
+  var ewwTotal = teTravelers.reduce(function(sum, t){ return sum + (t.ewwRate * t.ewwHours); }, 0);
+
+  // "To Prime" billable totals: every ODC line except per-diem meals and EWW
+  // is marked up by travel.feeMultiplier.
+  var billableMarkupBucket = (perTravelerMarkupBucket * inputs.trainers + tripLevelBucket) * travel.feeMultiplier;
+  var billableTripLead = (perDiemMealsTotal * inputs.trainers) + billableMarkupBucket;
+  var billableGrandTotal = billableTripLead + ewwTotal;
 
   return {
     nights: nights, fullDays: fullDays, perDiemMealsTotal: perDiemMealsTotal, hotelTotal: hotelTotal,
-    ewwTotal: ewwTotal, perTravelerInternal: perTravelerInternal, tripLeadInternal: tripLeadInternal
+    ewwTotal: ewwTotal, perTravelerInternal: perTravelerInternal, tripLeadInternal: tripLeadInternal,
+    billableMarkupBucket: billableMarkupBucket, billableTripLead: billableTripLead, billableGrandTotal: billableGrandTotal
   };
 }
 
@@ -299,7 +435,7 @@ function teReadFormInputs(){
   return {
     leaveDate: document.getElementById('te-leave-date').value,
     returnDate: document.getElementById('te-return-date').value,
-    trainers: parseInt(document.getElementById('te-trainers').value, 10) || 1,
+    trainers: teTravelers.length,
     lodgingRate: parseFloat(document.getElementById('te-gsa-lodging-rate').value) || 0,
     lodgingCost: parseFloat(document.getElementById('te-lodging-cost').value) || 0,
     lodgingFees: parseFloat(document.getElementById('te-lodging-fees').value) || 0,
@@ -315,9 +451,7 @@ function teReadFormInputs(){
     rideshare: parseFloat(document.getElementById('te-rideshare').value) || 0,
     mileage: parseFloat(document.getElementById('te-mileage').value) || 0,
     shippingTo: parseFloat(document.getElementById('te-shipping-to').value) || 0,
-    shippingBack: parseFloat(document.getElementById('te-shipping-back').value) || 0,
-    ewwRate: parseFloat(document.getElementById('te-eww-rate').value) || 0,
-    ewwHours: parseFloat(document.getElementById('te-eww-hours').value) || 0
+    shippingBack: parseFloat(document.getElementById('te-shipping-back').value) || 0
   };
 }
 
@@ -335,6 +469,8 @@ function teRecalc(){
   document.getElementById('te-total-trip-lead').textContent = '$' + calc.tripLeadInternal.toFixed(2);
   document.getElementById('te-total-eww').textContent = '$' + calc.ewwTotal.toFixed(2);
   document.getElementById('te-total-grand').textContent = '$' + (calc.tripLeadInternal + calc.ewwTotal).toFixed(2);
+  document.getElementById('te-total-billable-trip-lead').textContent = '$' + calc.billableTripLead.toFixed(2);
+  document.getElementById('te-total-billable-grand').textContent = '$' + calc.billableGrandTotal.toFixed(2);
 
   var warningEl = document.getElementById('te-lodging-warning');
   if(warningEl){
@@ -401,15 +537,24 @@ function teBuildBody(targetStatus, inputs){
   var slinId = document.getElementById('te-slin').value;
   var calc = teCalc(inputs);
   var destinationEvent = (city && state) ? (city + ', ' + state) : (city || state || null);
+
+  // Legacy-compat columns still read by the Travel Expense side's prefill
+  // logic (texEstimateSelected), which has no per-traveler EWW concept —
+  // write the average rate/hours across travelers into those two columns.
+  var ewwRateSum = 0, ewwHoursSum = 0;
+  teTravelers.forEach(function(t){ ewwRateSum += t.ewwRate; ewwHoursSum += t.ewwHours; });
+  var avgEwwRate = teTravelers.length ? (ewwRateSum / teTravelers.length) : 0;
+  var avgEwwHours = teTravelers.length ? (ewwHoursSum / teTravelers.length) : 0;
+
   var body = {
     destination_event: destinationEvent, city: city || null, state: state || null, event_name: eventName || null, slin_id: slinId || null,
     leave_date: inputs.leaveDate || null, return_date: inputs.returnDate || null,
-    number_of_trainers: inputs.trainers, per_diem_lodging_rate: inputs.lodgingRate, lodging_cost_per_night: inputs.lodgingCost, per_diem_meals_rate: inputs.mealsRate,
+    number_of_trainers: teTravelers.length, per_diem_lodging_rate: inputs.lodgingRate, lodging_cost_per_night: inputs.lodgingCost, per_diem_meals_rate: inputs.mealsRate,
     lodging_fees: inputs.lodgingFees, lodging_taxes: inputs.lodgingTaxes,
     airfare_avg: inputs.airfare, airport_parking_transport: inputs.parkingTransport, baggage: inputs.baggage,
     rental_car: inputs.rentalCar, fuel_gas: inputs.fuelGas, parking: inputs.parking, tolls: inputs.tolls, rideshare_estimate: inputs.rideshare, mileage: inputs.mileage,
     shipping_to: inputs.shippingTo, shipping_back: inputs.shippingBack,
-    eww_rate: inputs.ewwRate, eww_hours_per_trainer: inputs.ewwHours,
+    eww_rate: avgEwwRate, eww_hours_per_trainer: avgEwwHours,
     per_traveler_subtotal: calc.perTravelerInternal, trip_lead_total: calc.tripLeadInternal,
     estimated_total_odc: calc.tripLeadInternal, eww_total: calc.ewwTotal, status: targetStatus
   };
@@ -431,6 +576,7 @@ async function teEnsureDraftId(){
     var { data: inserted, error } = await supabaseClient.from('travel_estimates').insert(body).select('id').single();
     if(error){ throw error; }
     teEditingId = inserted.id;
+    await teSaveTravelers(teEditingId);
     await supabaseClient.from('travel_estimate_audit_log').insert({
       estimate_id: teEditingId, changed_by: currentProfile.id, action: 'edit', previous_status: null, new_status: 'draft'
     });
@@ -457,6 +603,11 @@ async function submitTravelEstimate(targetStatus){
       errorEl.textContent = 'Return date must be on or after leave date.';
       return;
     }
+    var missingTraveler = teTravelers.find(function(t){ return t.slot > 1 && !t.employeeId; });
+    if(missingTraveler){
+      errorEl.textContent = 'Select an employee for Traveler ' + missingTraveler.slot + ' (and any other added travelers) before submitting.';
+      return;
+    }
     if(teLodgingOverRate(inputs)){
       var quotesOk = teLodgingQuotes.length === 3 && teLodgingQuotes.every(function(q){ return q.average_daily_rate != null; });
       if(!quotesOk){
@@ -480,6 +631,8 @@ async function submitTravelEstimate(targetStatus){
       if(insErr){ throw insErr; }
       newId = inserted.id;
     }
+
+    await teSaveTravelers(newId);
 
     await supabaseClient.from('travel_estimate_audit_log').insert({
       estimate_id: newId, changed_by: currentProfile.id,

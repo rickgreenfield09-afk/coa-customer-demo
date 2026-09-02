@@ -1336,17 +1336,18 @@ function texActualCostsGridHtml(){
 // One self-contained "cell" per Actual Costs category, meant to sit inside
 // a 2-column grid (see texFormHtml) so a variance-explanation textarea, if
 // shown, never spans past the half-page column it's rendered in. Actual
-// input + read-only Estimated box (comparison against the linked estimate,
-// see texComputeEstimatedCosts) sit side by side; Receipts and the
-// conditional variance warning stack below, both still inside this cell.
+// input, read-only Estimated box (comparison against the linked estimate,
+// see texComputeEstimatedCosts — half the width of the Actual input), and
+// Receipts all sit in line on one row; the conditional variance warning
+// pops up full-width beneath that row, still inside this cell.
 function texActualCostRow(label, fieldId, category, actualValue, estimatedValue){
   var varianceOver = texIsVarianceOver10Pct(actualValue, estimatedValue);
   return '<div style="margin-bottom:18px;">'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;align-items:end;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
     + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label><input type="number" step="0.01" class="field-input" id="' + fieldId + '" value="' + (actualValue || 0) + '" oninput="texRecalc()"></div>'
     + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-estimated-' + category + '" style="margin:0;">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div></div>'
+    + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
     + '</div>'
-    + '<div style="margin-top:6px;"><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
     + '<div class="warning-box" id="tex-variance-wrap-' + category + '" style="' + (varianceOver ? '' : 'display:none;') + 'margin-top:10px;">'
     + '<div style="width:100%;"><div class="warning-box-title">' + escAttr(label) + ' is more than 10% over the estimate</div>'
     + '<textarea class="info-edit-input" id="tex-variance-note-' + category + '" rows="2" placeholder="Please explain the reason for this variance...">' + escAttr((texVarianceNotes && texVarianceNotes[category]) || '') + '</textarea></div>'

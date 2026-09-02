@@ -43,7 +43,16 @@ body{background:var(--void);color:var(--text);font-family:'DM Sans',sans-serif;h
 .field-input{width:100%;background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:12px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;outline:none;transition:border-color 0.15s;margin-bottom:18px;}
 .field-input:focus{border-color:var(--teal);}
 .field-input::placeholder{color:var(--muted);}
-input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);cursor:pointer;}
+/* Fixed navy icon (not theme-relative filter:invert, which went invisible
+   against a light-theme background) — matches the app's navy header hex. */
+input[type=date]::-webkit-calendar-picker-indicator{
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='18' height='18'%3E%3Cpath fill='%23122A54' d='M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v12H5V8h14zM7 10v4h4v-4H7z'/%3E%3C/svg%3E") center/18px no-repeat;
+  cursor:pointer;
+}
+/* Number inputs: no spin-button arrows anywhere in the app. */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+input[type=number]{-moz-appearance:textfield;}
 .btn{width:100%;padding:12px;border-radius:6px;border:none;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s;}
 .btn-primary{background:var(--teal);color:var(--void);}
 .btn-primary:hover{background:#35d4c0;}

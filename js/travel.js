@@ -257,7 +257,7 @@ function teRenderTravelerRows(){
     var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" style="font-size:40px;line-height:1;font-weight:700;" title="Remove traveler" onclick="teRemoveTraveler(' + t.slot + ')">&times;</button>';
     return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr 1fr 32px;align-items:end;">'
       + nameHtml
-      + '<div><label class="field-label">EWW Rate (per hour)</label><input type="number" step="0.01" class="field-input" value="' + t.ewwRate + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwRate\',this.value)"></div>'
+      + '<div><label class="field-label">EWW Rate (per hour)</label><input type="text" inputmode="decimal" class="field-input" id="te-traveler-eww-rate-' + t.slot + '" value="$' + (parseFloat(t.ewwRate) || 0).toFixed(2) + '" onfocus="currencyFocus(this)" onblur="teTravelerEwwRateBlur(this,' + t.slot + ')"></div>'
       + '<div><label class="field-label">EWW Hours</label><input type="number" step="0.01" class="field-input" value="' + t.ewwHours + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwHours\',this.value)"></div>'
       + '<div class="info-box"><div class="info-label">EWW Cost</div><div class="info-val">$' + ewwCost.toFixed(2) + '</div></div>'
       + '<div style="align-self:stretch;display:flex;align-items:center;justify-content:center;">' + removeBtn + '</div>'
@@ -305,8 +305,17 @@ function teSelectTravelerEmployee(slot, employeeId){
 function teUpdateTravelerEww(slot, field, value){
   var t = teTravelers[slot - 1];
   if(!t){ return; }
-  t[field] = parseFloat(value) || 0;
+  t[field] = parseMoneyValue(value);
   teRecalc();
+}
+
+// EWW Rate is a dollar field but lives in a dynamically added/removed row
+// (no stable oninput+id shape like currencyInputHtml assumes), so it gets
+// its own small blur handler instead: reformat as currency, then commit
+// into teTravelers via the existing update path.
+function teTravelerEwwRateBlur(el, slot){
+  el.value = '$' + parseMoneyValue(el.value).toFixed(2);
+  teUpdateTravelerEww(slot, 'ewwRate', el.value);
 }
 
 // Persists the current teTravelers array for an estimate: delete-then-insert

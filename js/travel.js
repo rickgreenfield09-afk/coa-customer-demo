@@ -21,6 +21,8 @@ var travel = {
   customerUserId: null,  // this guest's customer_users id (customer_admin)
   feeMultiplier: 1.10,
   odcSlins: [],
+  contracts: [],
+  taskOrders: [],
   subtab: ''
 };
 
@@ -55,8 +57,18 @@ async function loadTravelScreen(){
   var content = document.getElementById('travel-content');
 
   if(!travel.odcSlins.length){
-    var { data: slins } = await supabaseClient.from('slins').select('slin_id,slin_code,slin_description,contract_id').eq('slin_category', 'ODC/Cost').order('slin_code');
-    travel.odcSlins = slins || [];
+    // Task Order is derived from the SLIN's billing_nodes parent (SLIN node's
+    // parent_node_id) rather than stored on the slins table directly, so the
+    // approver's cascading Contract -> Task Order -> SLIN picker can filter
+    // SLINs by the chosen Task Order.
+    var { data: slins } = await supabaseClient.from('slins').select('slin_id,slin_code,slin_description,contract_id,billing_node_id,billing_nodes(parent_node_id)').eq('slin_category', 'ODC/Cost').order('slin_code');
+    travel.odcSlins = (slins || []).map(function(s){
+      return { slin_id: s.slin_id, slin_code: s.slin_code, slin_description: s.slin_description, contract_id: s.contract_id, task_order_node_id: s.billing_nodes ? s.billing_nodes.parent_node_id : null };
+    });
+    var { data: contracts } = await supabaseClient.from('contracts').select('contract_id,prime_contract_number,delivery_order_number,subcontract_number,customer_id').order('prime_contract_number');
+    travel.contracts = contracts || [];
+    var { data: taskOrders } = await supabaseClient.from('billing_nodes').select('node_id,parent_node_id,contract_id,label').eq('node_type', 'Task Order').order('sort_order');
+    travel.taskOrders = taskOrders || [];
     var { data: settings } = await supabaseClient.from('travel_settings').select('fee_multiplier').limit(1);
     if(settings && settings.length){ travel.feeMultiplier = parseFloat(settings[0].fee_multiplier) || 1.10; }
   }
@@ -108,10 +120,52 @@ function travelReadOnlyField(label, value){
   return '<div class="info-box"><div class="info-label">' + escAttr(label) + '</div><div class="info-val">' + (value == null || value === '' ? '—' : escAttr(value)) + '</div></div>';
 }
 
-function slinOptionsHtml(selected){
-  return '<option value=""' + (selected ? '' : ' selected') + '>— Select SLIN —</option>' + travel.odcSlins.map(function(s){
+function teContractLabel(c){
+  return (c.prime_contract_number || '') + (c.delivery_order_number ? ' / ' + c.delivery_order_number : '');
+}
+
+// Employees pick the Contract only (they know what contract they bill to,
+// not which SLIN) — the Supervisor assigns the specific Task Order + SLIN
+// at approval time via the cascading pickers below.
+function contractOptionsHtml(selected){
+  return '<option value="">— Select Contract —</option>' + travel.contracts.map(function(c){
+    return '<option value="' + c.contract_id + '"' + (c.contract_id === selected ? ' selected' : '') + '>' + escAttr(teContractLabel(c)) + '</option>';
+  }).join('');
+}
+
+function teApprovalTaskOrderOptionsHtml(contractId, selected){
+  var opts = travel.taskOrders.filter(function(t){ return t.contract_id === contractId; });
+  return '<option value="">— Select Task Order —</option>' + opts.map(function(t){
+    return '<option value="' + t.node_id + '"' + (t.node_id === selected ? ' selected' : '') + '>' + escAttr(t.label) + '</option>';
+  }).join('');
+}
+
+function teApprovalSlinOptionsHtml(taskOrderNodeId, selected){
+  var opts = travel.odcSlins.filter(function(s){ return s.task_order_node_id === taskOrderNodeId; });
+  return '<option value="">— Select SLIN —</option>' + opts.map(function(s){
     return '<option value="' + s.slin_id + '"' + (s.slin_id === selected ? ' selected' : '') + '>' + escAttr(s.slin_code) + ' — ' + escAttr(s.slin_description || '') + '</option>';
   }).join('');
+}
+
+function teApprovalContractChanged(){
+  var contractId = document.getElementById('te-approval-contract').value;
+  document.getElementById('te-approval-task-order').innerHTML = teApprovalTaskOrderOptionsHtml(contractId, null);
+  document.getElementById('te-approval-slin').innerHTML = teApprovalSlinOptionsHtml(null, null);
+}
+
+function teApprovalTaskOrderChanged(){
+  var taskOrderId = document.getElementById('te-approval-task-order').value;
+  document.getElementById('te-approval-slin').innerHTML = teApprovalSlinOptionsHtml(taskOrderId, null);
+}
+
+// Demo-simple, human-readable identifier assigned once at Supervisor
+// approval — not a real sequence, just distinct enough for this dataset.
+function teGenerateTrackingNumber(){
+  var d = new Date();
+  var pad = function(n){ return n < 10 ? '0' + n : '' + n; };
+  var datePart = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate());
+  var randPart = Math.floor(1000 + Math.random() * 9000);
+  return 'TRK-' + datePart + '-' + randPart;
 }
 
 // =====================================================================
@@ -352,7 +406,7 @@ function teFormHtml(row, rejectionNote){
     + '<div><label class="field-label" for="te-state">State</label><input class="field-input" id="te-state" list="te-state-list" placeholder="ST" autocomplete="off" onchange="teMaybeAutoLookupGsa()"><datalist id="te-state-list">'
     + teUsStates.map(function(s){ return '<option value="' + s.abbr + '">' + s.name + '</option>'; }).join('')
     + '</datalist></div>'
-    + '<div><label class="field-label" for="te-slin">SLIN</label><select class="field-input" id="te-slin">' + slinOptionsHtml() + '</select></div>'
+    + '<div><label class="field-label" for="te-contract">Contract</label><select class="field-input" id="te-contract">' + contractOptionsHtml(row ? row.contract_id : null) + '</select></div>'
     + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 100px;">'
     + '<div><label class="field-label" for="te-leave-date">Leave Date</label><input type="date" class="field-input" id="te-leave-date" oninput="teRecalc();teMaybeAutoLookupGsa();"></div>'
@@ -375,7 +429,8 @@ function teFormHtml(row, rejectionNote){
     + '<div class="info-box"><div class="info-label">Per Diem Meals Total</div><div class="info-val" id="te-calc-perdiem">$0.00</div></div>'
     + '</div>'
     + '<div class="login-error" id="te-gsa-lookup-error" style="text-align:left;margin-top:-4px;"></div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr;">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
+    + '<div><label class="field-label" for="te-room-cost">Room Cost (subject to per diem limit)</label>' + currencyInputHtml('te-room-cost', 0, 'teRecalc') + '</div>'
     + '<div><label class="field-label" for="te-lodging-cost">Total Lodging Cost (incl. taxes &amp; fees)</label>' + currencyInputHtml('te-lodging-cost', 0, 'teRecalc') + '</div>'
     + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
@@ -442,13 +497,13 @@ function tePrefillForm(row){
   document.getElementById('te-city').value = row.city || '';
   document.getElementById('te-state').value = row.state || '';
   document.getElementById('te-event-name').value = row.event_name || '';
-  document.getElementById('te-slin').value = row.slin_id || '';
+  document.getElementById('te-contract').value = row.contract_id || '';
   document.getElementById('te-trainers').value = teTravelers.length;
   document.getElementById('te-leave-date').value = row.leave_date || '';
   document.getElementById('te-return-date').value = row.return_date || '';
   var teMoneyFieldMap = {
     'te-gsa-lodging-rate': row.per_diem_lodging_rate, 'te-lodging-cost': row.lodging_cost_total,
-    'te-lodging-fees': row.lodging_fees, 'te-lodging-taxes': row.lodging_taxes,
+    'te-room-cost': row.lodging_room_cost, 'te-lodging-fees': row.lodging_fees, 'te-lodging-taxes': row.lodging_taxes,
     'te-meals-rate': row.per_diem_meals_rate, 'te-airfare': row.airfare_avg,
     'te-parking-transport': row.airport_parking_transport, 'te-baggage': row.baggage,
     'te-rental-car': row.rental_car, 'te-fuel-gas': row.fuel_gas, 'te-parking': row.parking,
@@ -511,6 +566,7 @@ function teReadFormInputs(){
     trainers: teTravelers.length,
     lodgingRate: parseMoneyValue(document.getElementById('te-gsa-lodging-rate').value),
     lodgingCost: parseMoneyValue(document.getElementById('te-lodging-cost').value),
+    roomCost: parseMoneyValue(document.getElementById('te-room-cost').value),
     lodgingFees: parseMoneyValue(document.getElementById('te-lodging-fees').value),
     lodgingTaxes: parseMoneyValue(document.getElementById('te-lodging-taxes').value),
     mealsRate: parseMoneyValue(document.getElementById('te-meals-rate').value),
@@ -528,11 +584,12 @@ function teReadFormInputs(){
   };
 }
 
-// lodgingCost is a stay TOTAL (incl. fees/taxes), lodgingRate is the GSA
-// rate PER NIGHT — compare the average nightly cost of the stay against
-// the per-night GSA rate, not the raw stay total.
+// The GSA per diem lodging ceiling applies to the ROOM rate only — taxes
+// and fees don't count against it — so compare the average nightly ROOM
+// cost (roomCost, not the all-in lodgingCost total) against the per-night
+// GSA rate.
 function teLodgingAvgPerNight(inputs, nights){
-  return nights > 0 ? inputs.lodgingCost / nights : 0;
+  return nights > 0 ? inputs.roomCost / nights : 0;
 }
 function teLodgingOverRate(inputs, nights){
   return nights > 0 && teLodgingAvgPerNight(inputs, nights) > inputs.lodgingRate;
@@ -558,7 +615,7 @@ function teRecalc(){
     if(teLodgingOverRate(inputs, calc.nights)){
       warningEl.style.display = '';
       document.getElementById('te-lodging-warning-text').textContent =
-        'Average lodging cost ($' + teLodgingAvgPerNight(inputs, calc.nights).toFixed(2) + '/night, from a $' + inputs.lodgingCost.toFixed(2) + ' total over ' + calc.nights + ' nights) exceeds the GSA rate ($' + inputs.lodgingRate.toFixed(2) + '/night) — 3 comparison quotes are required to submit.';
+        'Average room cost ($' + teLodgingAvgPerNight(inputs, calc.nights).toFixed(2) + '/night, from a $' + inputs.roomCost.toFixed(2) + ' room cost over ' + calc.nights + ' nights — taxes & fees don\'t count against the limit) exceeds the GSA rate ($' + inputs.lodgingRate.toFixed(2) + '/night) — 3 comparison quotes are required to submit.';
       document.getElementById('te-lodging-quotes-btn').textContent = 'Upload Comparison Quotes (' + teLodgingQuotes.length + ' of 3)';
     }else{
       warningEl.style.display = 'none';
@@ -637,6 +694,7 @@ function renderTeReadOnlyDetail(r){
   var wrap = document.getElementById('te-detail-wrap');
   var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
   var slin = travel.odcSlins.find(function(s){ return s.slin_id === r.slin_id; });
+  var contract = travel.contracts.find(function(c){ return c.contract_id === r.contract_id; });
 
   wrap.innerHTML = '<div class="tk-entry-card">'
     + '<div class="tk-section-title">Travel Estimate — ' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + ' <span class="tk-status-pill ' + r.status + '">' + r.status.replace('_', ' ') + '</span></div>'
@@ -644,7 +702,9 @@ function renderTeReadOnlyDetail(r){
     + '<div class="profile-grid">'
     + travelReadOnlyField('Destination', r.destination_event)
     + travelReadOnlyField('Event Name', r.event_name)
-    + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : '—')
+    + travelReadOnlyField('Contract', contract ? teContractLabel(contract) : '—')
+    + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : 'Not yet assigned')
+    + travelReadOnlyField('Tracking Number', r.tracking_number || 'Not yet assigned')
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
     + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
     + travelReadOnlyField('Per Traveler Subtotal', '$' + (parseFloat(r.per_traveler_subtotal) || 0).toFixed(2))
@@ -663,7 +723,7 @@ function teBuildBody(targetStatus, inputs){
   var city = document.getElementById('te-city').value.trim();
   var state = document.getElementById('te-state').value.trim();
   var eventName = document.getElementById('te-event-name').value.trim();
-  var slinId = document.getElementById('te-slin').value;
+  var contractId = document.getElementById('te-contract').value;
   var calc = teCalc(inputs);
   var destinationEvent = (city && state) ? (city + ', ' + state) : (city || state || null);
 
@@ -676,10 +736,10 @@ function teBuildBody(targetStatus, inputs){
   var avgEwwHours = teTravelers.length ? (ewwHoursSum / teTravelers.length) : 0;
 
   var body = {
-    destination_event: destinationEvent, city: city || null, state: state || null, event_name: eventName || null, slin_id: slinId || null,
+    destination_event: destinationEvent, city: city || null, state: state || null, event_name: eventName || null, contract_id: contractId || null,
     leave_date: inputs.leaveDate || null, return_date: inputs.returnDate || null,
     number_of_trainers: teTravelers.length, per_diem_lodging_rate: inputs.lodgingRate, lodging_cost_total: inputs.lodgingCost,
-    lodging_fees: inputs.lodgingFees, lodging_taxes: inputs.lodgingTaxes, per_diem_meals_rate: inputs.mealsRate,
+    lodging_room_cost: inputs.roomCost, lodging_fees: inputs.lodgingFees, lodging_taxes: inputs.lodgingTaxes, per_diem_meals_rate: inputs.mealsRate,
     airfare_avg: inputs.airfare, airport_parking_transport: inputs.parkingTransport, baggage: inputs.baggage,
     rental_car: inputs.rentalCar, fuel_gas: inputs.fuelGas, parking: inputs.parking, tolls: inputs.tolls, rideshare_estimate: inputs.rideshare, mileage: inputs.mileage,
     shipping_to: inputs.shippingTo, shipping_back: inputs.shippingBack,
@@ -694,7 +754,7 @@ function teBuildBody(targetStatus, inputs){
     body.approved_by = null;
     body.approved_at = null;
   }
-  return { body: body, city: city, state: state, slinId: slinId };
+  return { body: body, city: city, state: state, contractId: contractId };
 }
 
 // Silently creates a draft row from the form's current values, without
@@ -730,8 +790,8 @@ async function submitTravelEstimate(targetStatus){
   var built = teBuildBody(targetStatus, inputs);
 
   if(targetStatus === 'submitted'){
-    if(!built.city || !built.state || !built.slinId || !inputs.leaveDate || !inputs.returnDate){
-      errorEl.textContent = 'City, State, SLIN, and both dates are required to submit.';
+    if(!built.city || !built.state || !built.contractId || !inputs.leaveDate || !inputs.returnDate){
+      errorEl.textContent = 'City, State, Contract, and both dates are required to submit.';
       return;
     }
     if(new Date(inputs.returnDate) < new Date(inputs.leaveDate)){
@@ -1045,14 +1105,18 @@ async function teFetchEstimateDetailData(estimateId){
 
 // Itemized HTML email — inline-styled (email clients strip external/app
 // CSS, same reasoning as dashboard.js's buildReportHtml) mirroring the same
-// sections as the on-screen Supervisor approval detail above. One template,
-// two modes: showBillableToPrime adds the fee-marked-up column next to
-// every ODC line item (used once the estimate reaches the Prime stage);
-// without it, only the actual requested amounts show (the submitter's own
-// copy, and the Supervisor's copy of a fresh submission).
+// sections as the on-screen Supervisor approval detail above. Three modes:
+//   - default: only the actual requested amounts show (the submitter's own
+//     copy, and the Supervisor's copy of a fresh submission).
+//   - showBillableToPrime: adds the fee-marked-up "Billable to Prime" column
+//     next to the requested one (the Supervisor's own internal record of an
+//     approval, which needs to see both figures).
+//   - primeView: the Prime's own copy — they only ever see ONE total per
+//     line, already marked up, never the internal "Requested" figure.
 function buildTravelEstimateEmailHtml(data, opts){
   opts = opts || {};
   var showBillable = !!opts.showBillableToPrime;
+  var primeView = !!opts.primeView;
   var r = data.r, slin = data.slin, multiplier = data.multiplier, travelerRows = data.travelerRows, nights = data.nights;
   var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
   var appUrl = window.location.origin + window.location.pathname;
@@ -1066,6 +1130,13 @@ function buildTravelEstimateEmailHtml(data, opts){
     return '<tr><td style="' + tdStyle + 'color:#5C607E;">' + escAttr(label) + '</td><td style="' + tdStyle + '"><strong>$' + value.toFixed(2) + '</strong></td></tr>';
   }
   function markupTable(sectionLabel, items){
+    if(primeView){
+      var pHeader = '<th style="' + thStyle + '">Item</th><th style="' + thStyle + '">Total</th>';
+      var pBody = items.map(function(it){
+        return '<tr><td style="' + tdStyle + '">' + escAttr(it.label) + '</td><td style="' + tdStyle + '">$' + (it.value * multiplier).toFixed(2) + '</td></tr>';
+      }).join('');
+      return '<h3 style="' + h3Style + '">' + escAttr(sectionLabel) + '</h3><table style="' + tableStyle + '"><tr>' + pHeader + '</tr>' + pBody + '</table>';
+    }
     var header = '<th style="' + thStyle + '">Item</th><th style="' + thStyle + '">Requested</th>' + (showBillable ? '<th style="' + thStyle + '">Billable to Prime</th>' : '');
     var body = items.map(function(it){
       var billable = it.value * multiplier;
@@ -1076,11 +1147,11 @@ function buildTravelEstimateEmailHtml(data, opts){
 
   return '<div style="font-family:Arial,sans-serif;color:#1B1D22;max-width:640px;">'
     + '<h2 style="font-size:18px;color:#122A54;margin-bottom:4px;">' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</h2>'
-    + '<p style="color:#5C607E;font-size:13px;margin-top:0;">' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + ' (' + nights + ' nights)' + (slin ? ' · SLIN ' + escAttr(slin.slin_code) : '') + '</p>'
+    + '<p style="color:#5C607E;font-size:13px;margin-top:0;">' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + ' (' + nights + ' nights)' + (slin ? ' · SLIN ' + escAttr(slin.slin_code) : '') + (r.tracking_number ? ' · Tracking #: ' + escAttr(r.tracking_number) : '') + '</p>'
     + markupTable('Lodging', [
         { label: 'Total Lodging Cost (incl. taxes & fees)', value: parseFloat(r.lodging_cost_total) || 0 }
       ])
-    + '<p style="color:#5C607E;font-size:12px;margin:-8px 0 12px;">Of the total above — Fees: $' + (parseFloat(r.lodging_fees) || 0).toFixed(2) + ' · Taxes: $' + (parseFloat(r.lodging_taxes) || 0).toFixed(2) + ' (contract-handled separately, not additional cost)</p>'
+    + (primeView ? '' : '<p style="color:#5C607E;font-size:12px;margin:-8px 0 12px;">Of the total above — Fees: $' + (parseFloat(r.lodging_fees) || 0).toFixed(2) + ' · Taxes: $' + (parseFloat(r.lodging_taxes) || 0).toFixed(2) + ' (contract-handled separately, not additional cost)</p>')
     + markupTable('Flight', [
         { label: 'Airfare (avg)', value: parseFloat(r.airfare_avg) || 0 },
         { label: 'Baggage', value: parseFloat(r.baggage) || 0 },
@@ -1109,11 +1180,15 @@ function buildTravelEstimateEmailHtml(data, opts){
     + '</table>'
     + '<h3 style="' + h3Style + '">Totals</h3>'
     + '<table style="' + tableStyle + '">'
-    + totalsRow('Trip Lead Total', parseFloat(r.trip_lead_total) || 0)
-    + totalsRow('EWW Total', parseFloat(r.eww_total) || 0)
-    + totalsRow('Grand Total', grand)
-    + (showBillable ? totalsRow('Billable to Prime (ODC)', parseFloat(r.billable_trip_lead_total) || 0) : '')
-    + (showBillable ? totalsRow('Grand Total to Prime', parseFloat(r.billable_grand_total) || 0) : '')
+    + (primeView
+        ? totalsRow('Trip Lead Total', parseFloat(r.billable_trip_lead_total) || 0)
+          + totalsRow('EWW Total', parseFloat(r.eww_total) || 0)
+          + totalsRow('Grand Total', parseFloat(r.billable_grand_total) || 0)
+        : totalsRow('Trip Lead Total', parseFloat(r.trip_lead_total) || 0)
+          + totalsRow('EWW Total', parseFloat(r.eww_total) || 0)
+          + totalsRow('Grand Total', grand)
+          + (showBillable ? totalsRow('Billable to Prime (ODC)', parseFloat(r.billable_trip_lead_total) || 0) : '')
+          + (showBillable ? totalsRow('Grand Total to Prime', parseFloat(r.billable_grand_total) || 0) : ''))
     + '</table>'
     + '<p style="margin-top:20px;"><a href="' + appUrl + '" style="color:#2AB8A6;">Open the app</a></p>'
     + '</div>';
@@ -1126,13 +1201,15 @@ async function openEstimateApproval(estimateId){
   if(!data){ detail.innerHTML = ''; return; }
   var r = data.r, names = data.names, slin = data.slin, multiplier = data.multiplier, travelerRows = data.travelerRows, nights = data.nights;
   var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
+  var contract = travel.contracts.find(function(c){ return c.contract_id === r.contract_id; });
 
   var demographicsHtml = '<div class="resume-section"><div class="resume-section-title">Demographics</div>'
     + '<div class="profile-grid">'
     + travelReadOnlyField('Destination', r.destination_event)
     + travelReadOnlyField('Event Name', r.event_name)
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + ' (' + nights + ' nights)')
-    + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : '—')
+    + travelReadOnlyField('Contract (submitted by employee)', contract ? teContractLabel(contract) : '—')
+    + travelReadOnlyField('Tracking Number', r.tracking_number || 'Assigned on approval')
     + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
     + travelReadOnlyField('Fee Multiplier Used', multiplier ? multiplier.toFixed(4) + 'x' : '—')
     + '</div></div>';
@@ -1151,6 +1228,7 @@ async function openEstimateApproval(estimateId){
     { label: 'Total Lodging Cost (incl. taxes & fees)', value: parseFloat(r.lodging_cost_total) || 0 }
   ], multiplier)
     + '<div class="profile-grid" style="margin-top:-8px;">'
+    + travelReadOnlyField('Room Cost (subject to per diem limit)', '$' + (parseFloat(r.lodging_room_cost) || 0).toFixed(2))
     + travelReadOnlyField('GSA Lodging Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_lodging_rate) || 0).toFixed(2))
     + travelReadOnlyField('Meals (M&IE) Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_meals_rate) || 0).toFixed(2))
     + travelReadOnlyField('Lodging Fees (included in total, contract-handled)', '$' + (parseFloat(r.lodging_fees) || 0).toFixed(2))
@@ -1188,9 +1266,16 @@ async function openEstimateApproval(estimateId){
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val">$' + (parseFloat(r.billable_grand_total) || 0).toFixed(2) + '</div></div>'
     + '</div></div>';
 
+  var billingAssignmentHtml = '<div class="resume-section"><div class="resume-section-title">Billing Assignment (required to approve — employees don\'t know which SLIN to bill to)</div>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
+    + '<div><label class="field-label" for="te-approval-contract">Contract</label><select class="field-input" id="te-approval-contract" onchange="teApprovalContractChanged()">' + contractOptionsHtml(r.contract_id) + '</select></div>'
+    + '<div><label class="field-label" for="te-approval-task-order">Task Order</label><select class="field-input" id="te-approval-task-order" onchange="teApprovalTaskOrderChanged()">' + teApprovalTaskOrderOptionsHtml(r.contract_id, r.task_order_node_id) + '</select></div>'
+    + '<div><label class="field-label" for="te-approval-slin">SLIN</label><select class="field-input" id="te-approval-slin">' + teApprovalSlinOptionsHtml(r.task_order_node_id, r.slin_id) + '</select></div>'
+    + '</div></div>';
+
   detail.innerHTML = '<div class="tk-entry-card">'
     + '<div class="tk-section-title">Travel Estimate — ' + escAttr(names[r.created_by] || '—') + '</div>'
-    + demographicsHtml + travelersHtml + lodgingHtml + flightHtml + transportationHtml + otherOdcHtml + totalsHtml
+    + demographicsHtml + travelersHtml + lodgingHtml + flightHtml + transportationHtml + otherOdcHtml + totalsHtml + billingAssignmentHtml
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'
     + '<div class="profile-actions">'
@@ -1211,11 +1296,25 @@ async function estimateApprovalAction(estimateId, decision){
     errorEl.textContent = 'A note is required to return or deny this estimate.';
     return;
   }
+  var contractId, taskOrderId, slinId;
+  if(decision === 'supervisor_approved'){
+    contractId = document.getElementById('te-approval-contract').value;
+    taskOrderId = document.getElementById('te-approval-task-order').value;
+    slinId = document.getElementById('te-approval-slin').value;
+    if(!contractId || !taskOrderId || !slinId){
+      errorEl.textContent = 'Select the Contract, Task Order, and SLIN to bill this estimate to before approving.';
+      return;
+    }
+  }
   try{
     var { data: existing } = await supabaseClient.from('travel_estimates').select('status').eq('id', estimateId).limit(1);
     var previousStatus = existing && existing.length ? existing[0].status : null;
     var body = { status: decision };
-    if(decision === 'supervisor_approved'){ body.approved_by = travel.employeeId; body.approved_at = new Date().toISOString(); }
+    if(decision === 'supervisor_approved'){
+      body.approved_by = travel.employeeId; body.approved_at = new Date().toISOString();
+      body.contract_id = contractId; body.task_order_node_id = taskOrderId; body.slin_id = slinId;
+      body.tracking_number = teGenerateTrackingNumber();
+    }
 
     var { error } = await supabaseClient.from('travel_estimates').update(body).eq('id', estimateId);
     if(error){ throw error; }
@@ -1233,9 +1332,13 @@ async function estimateApprovalAction(estimateId, decision){
       var emailData = await teFetchEstimateDetailData(estimateId);
       if(emailData){
         var tripLabel = escAttr(emailData.r.destination_event || emailData.r.event_name || 'the trip');
-        var emailHtml = buildTravelEstimateEmailHtml(emailData, { showBillableToPrime: true });
-        notifySelf('Travel estimate approved — ' + tripLabel, '<p>You approved this travel estimate internally. Here\'s a copy including the Prime-billable totals.</p>' + emailHtml);
-        notifySelf('Action needed: Prime authorization — ' + tripLabel, '<p>A travel estimate is ready for your authorization. Switch to your Prime view to review and authorize it.</p>' + emailHtml);
+        // Supervisor's own copy sees both the requested and billable-to-Prime
+        // columns (internal record); the Prime's copy sees only the single
+        // marked-up total they'll actually be invoiced — no internal figures.
+        var emailHtmlOwn = buildTravelEstimateEmailHtml(emailData, { showBillableToPrime: true });
+        var emailHtmlPrime = buildTravelEstimateEmailHtml(emailData, { primeView: true });
+        notifySelf('Travel estimate approved — ' + tripLabel, '<p>You approved this travel estimate internally. Here\'s a copy including the Prime-billable totals.</p>' + emailHtmlOwn);
+        notifySelf('Action needed: Prime authorization — ' + tripLabel, '<p>A travel estimate is ready for your authorization. Switch to your Prime view to review and authorize it.</p>' + emailHtmlPrime);
       }
     }else{
       notifySelf('Travel estimate ' + decision, '<p>You ' + decision + ' a travel estimate' + (approvalNote ? ': ' + escAttr(approvalNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
@@ -1253,7 +1356,7 @@ async function loadAuthorizationsQueue(){
   var content = document.getElementById('travel-content');
   content.innerHTML = '<div class="tk-empty">Loading...</div>';
   try{
-    var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,created_by,slin_id').eq('status', 'supervisor_approved').order('created_at');
+    var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,eww_total,billable_grand_total,tracking_number,created_by,slin_id').eq('status', 'supervisor_approved').order('created_at');
     rows = rows || [];
     var scoped = [];
     for(var i = 0; i < rows.length; i++){
@@ -1264,11 +1367,10 @@ async function loadAuthorizationsQueue(){
 
     content.innerHTML = '<div class="tk-entry-card"><div class="tk-section-title">Travel Authorizations Needed (' + scoped.length + ')</div>'
       + (scoped.length
-          ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Employee</th><th>Destination</th><th>Dates</th><th>Grand Total</th><th></th></tr></thead><tbody>'
+          ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Employee</th><th>Destination</th><th>Dates</th><th>Tracking #</th><th>Grand Total</th><th></th></tr></thead><tbody>'
             + scoped.map(function(r){
-                var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
                 return '<tr><td>' + escAttr(names[r.created_by] || '—') + '</td><td>' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</td>'
-                  + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td><td>$' + grand.toFixed(2) + '</td>'
+                  + '<td>' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + '</td><td>' + escAttr(r.tracking_number || '—') + '</td><td>$' + (parseFloat(r.billable_grand_total) || 0).toFixed(2) + '</td>'
                   + '<td><button class="tk-now-btn" type="button" onclick="openAuthorizationReview(\'' + r.id + '\')">Review</button></td></tr>';
               }).join('') + '</tbody></table></div>'
           : '<div class="tk-empty">Nothing awaiting authorization.</div>')
@@ -1286,7 +1388,10 @@ async function openAuthorizationReview(estimateId){
   if(!rows || !rows.length){ detail.innerHTML = ''; return; }
   var r = rows[0];
   var names = await employeeNamesById([r.created_by]);
-  var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
+  var slin = travel.odcSlins.find(function(s){ return s.slin_id === r.slin_id; });
+  // The Prime only ever sees the marked-up total, never the internal
+  // (non-billable) trip lead figure.
+  var grand = parseFloat(r.billable_grand_total) || 0;
 
   detail.innerHTML = '<div class="tk-entry-card">'
     + '<div class="tk-section-title">Authorize Travel — ' + escAttr(names[r.created_by] || '—') + '</div>'
@@ -1295,6 +1400,8 @@ async function openAuthorizationReview(estimateId){
     + travelReadOnlyField('Destination', r.destination_event)
     + travelReadOnlyField('Event Name', r.event_name)
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
+    + travelReadOnlyField('Tracking Number', r.tracking_number || '—')
+    + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : '—')
     + travelReadOnlyField('Grand Total', '$' + grand.toFixed(2))
     + '</div>'
     + '<div id="travel-auth-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-auth-note" rows="2"></textarea></div>'
@@ -1446,7 +1553,7 @@ async function loadMyExpenses(editId){
 
   try{
     if(texEditingId){
-      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total)').eq('id', texEditingId).limit(1);
+      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number)').eq('id', texEditingId).limit(1);
       if(rows && rows.length){ texEditingRow = rows[0]; }
     }
 
@@ -1457,7 +1564,7 @@ async function loadMyExpenses(editId){
     }
 
     if(!texEditingRow){
-      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total').eq('created_by', travel.employeeId).eq('status', 'approved');
+      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number').eq('created_by', travel.employeeId).eq('status', 'approved');
       var { data: existing } = await supabaseClient.from('travel_expenses').select('estimate_id').eq('created_by', travel.employeeId);
       var takenIds = (existing || []).map(function(r){ return r.estimate_id; });
       texAvailableEstimates = (approved || []).filter(function(e){ return takenIds.indexOf(e.id) === -1; });
@@ -1659,11 +1766,12 @@ function texFormHtml(row){
     ? (texAvailableEstimates.length
         ? '<div class="tk-pto-form-grid" style="grid-template-columns:1fr;"><div><label class="field-label" for="tex-estimate-select">Authorized Estimate</label>'
           + '<select class="field-input" id="tex-estimate-select" onchange="texEstimateSelected()"><option value="">— Select an authorized estimate —</option>'
-          + texAvailableEstimates.map(function(e){ return '<option value="' + e.id + '">' + escAttr(e.destination_event || '—') + (e.event_name ? ' — ' + escAttr(e.event_name) : '') + ' (' + formatDate(e.leave_date) + ' – ' + formatDate(e.return_date) + ')</option>'; }).join('')
+          + texAvailableEstimates.map(function(e){ return '<option value="' + e.id + '">' + escAttr(e.destination_event || '—') + (e.event_name ? ' — ' + escAttr(e.event_name) : '') + ' (' + formatDate(e.leave_date) + ' – ' + formatDate(e.return_date) + ')' + (e.tracking_number ? ' [' + e.tracking_number + ']' : '') + '</option>'; }).join('')
           + '</select></div></div>'
         : '<div class="placeholder-sub" style="margin-bottom:14px;">No authorized estimates available to expense yet — an estimate must be Supervisor-approved and Customer-authorized first.</div>')
     : '<div class="profile-grid">' + travelReadOnlyField('Destination', row.travel_estimates ? row.travel_estimates.destination_event : '—')
       + travelReadOnlyField('Event Name', row.travel_estimates ? row.travel_estimates.event_name : '—')
+      + travelReadOnlyField('Tracking Number', row.travel_estimates ? row.travel_estimates.tracking_number : '—')
       + travelReadOnlyField('Estimated Grand Total', '$' + ((parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0) + (parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0)).toFixed(2)) + '</div>';
 
   return '<div class="tk-entry-card">'
@@ -1839,6 +1947,7 @@ function renderTexReadOnlyDetail(r){
     + '<div class="tk-section-title">Expense Report — ' + escAttr(est.destination_event || '—') + (est.event_name ? ' — ' + escAttr(est.event_name) : '') + ' <span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></div>'
     + '<div class="placeholder-sub" style="margin-bottom:14px;">This report is ' + r.current_status + ' and can no longer be edited here.</div>'
     + '<div class="profile-grid">'
+    + travelReadOnlyField('Tracking Number', est.tracking_number || '—')
     + travelReadOnlyField('Actual Dates', formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date))
     + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
     + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.actual_trip_lead_total) || 0).toFixed(2))

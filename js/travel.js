@@ -1443,10 +1443,12 @@ function texRenderCategoryReceipts(category){
 // estimated" note is always required, not just past the 10% threshold.
 
 function texAdditionalExpensesSectionHtml(){
-  var rowsHtml = texAdditionalCategories.map(function(cat){
-    var c = texCostCategories.find(function(x){ return x.category === cat; });
-    return c ? texAdditionalExpenseRowHtml(c) : '';
-  }).join('');
+  var rowsHtml = '<div id="tex-additional-costs-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;">'
+    + texAdditionalCategories.map(function(cat){
+        var c = texCostCategories.find(function(x){ return x.category === cat; });
+        return c ? texAdditionalExpenseRowHtml(c) : '';
+      }).join('')
+    + '</div>';
   var available = texCostCategories.filter(function(c){
     return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && texAdditionalCategories.indexOf(c.category) === -1;
   });
@@ -1459,15 +1461,24 @@ function texAdditionalExpensesSectionHtml(){
   return rowsHtml + addControlHtml;
 }
 
+// Same shape as texActualCostRow (Actual | Estimated | Receipts, then a
+// note box beneath) so a category added here looks identical to one in the
+// main Actual Costs grid — "Estimated" just shows "—" since there wasn't
+// one, and the note uses the same always-visible warning-box styling as
+// the main section's variance-explanation box (here it's always shown and
+// always required, not conditional on the 10% threshold).
 function texAdditionalExpenseRowHtml(c){
-  return '<div style="margin-bottom:18px;" id="tex-additional-row-' + c.category + '">'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 32px;align-items:end;">'
+  return '<div style="margin-bottom:18px;position:relative;" id="tex-additional-row-' + c.category + '">'
+    + '<button type="button" class="btn-remove-row" style="position:absolute;top:0;right:0;font-size:18px;line-height:1;font-weight:700;" title="Remove this expense" onclick="texRemoveAdditionalExpense(\'' + c.category + '\')">&times;</button>'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
     + '<div><label class="field-label" for="' + c.fieldId + '">' + escAttr(c.label) + '</label>' + texCurrencyInputHtml(c.fieldId, 0) + '</div>'
+    + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" style="margin:0;">—</div></div></div>'
     + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + c.category + '">' + texRenderCategoryReceipts(c.category) + '</div></div>'
-    + '<div style="align-self:stretch;display:flex;align-items:center;justify-content:center;"><button type="button" class="btn-remove-row" style="font-size:24px;line-height:1;font-weight:700;" title="Remove this expense" onclick="texRemoveAdditionalExpense(\'' + c.category + '\')">&times;</button></div>'
     + '</div>'
-    + '<div style="margin-top:6px;"><label class="field-label" for="tex-variance-note-' + c.category + '">Why wasn\'t this on the original estimate?</label>'
+    + '<div class="warning-box" style="margin-top:10px;">'
+    + '<div style="width:100%;"><div class="warning-box-title">Why wasn\'t ' + escAttr(c.label) + ' on the original estimate?</div>'
     + '<textarea class="info-edit-input" id="tex-variance-note-' + c.category + '" rows="2" placeholder="Please explain why this wasn\'t included in the estimate...">' + escAttr((texVarianceNotes && texVarianceNotes[c.category]) || '') + '</textarea></div>'
+    + '</div>'
     + '</div>';
 }
 

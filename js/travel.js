@@ -680,7 +680,10 @@ async function submitTravelEstimate(targetStatus){
     });
 
     teEditingId = null; teEditingRow = null; teFormDirty = false;
-    loadMyEstimates();
+    await loadMyEstimates();
+    showToast(targetStatus === 'submitted' ? 'Travel estimate submitted.' : 'Draft saved.');
+    var screenEl = document.getElementById('screen-travel');
+    if(screenEl){ screenEl.scrollTo({ top: 0, behavior: 'smooth' }); }
   }catch(e){
     errorEl.textContent = 'Couldn\'t save travel estimate. Try again.';
     console.error(e);
@@ -885,6 +888,22 @@ function uniq(arr){
   return out;
 }
 
+// Renders a compact "Requested vs. Billable to Prime" table for a set of
+// line items — the fee multiplier (stored on the estimate as
+// fee_multiplier_used at submit time) applies to every ODC line except
+// per-diem meals and EWW, matching the real reference spreadsheet's
+// "To Prime" sheet. Zero-value rows are still shown (an approver needs to
+// see what WASN'T filled in, not just what was).
+function teApprovalMarkupTable(sectionLabel, items, multiplier){
+  return '<div class="resume-section"><div class="resume-section-title">' + escAttr(sectionLabel) + '</div>'
+    + '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Item</th><th>Requested</th><th>Billable to Prime</th></tr></thead><tbody>'
+    + items.map(function(it){
+        var billable = it.value * multiplier;
+        return '<tr><td>' + escAttr(it.label) + '</td><td>$' + it.value.toFixed(2) + '</td><td>$' + billable.toFixed(2) + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div></div>';
+}
+
 async function openEstimateApproval(estimateId){
   var detail = document.getElementById('travel-approval-detail');
   detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
@@ -893,20 +912,82 @@ async function openEstimateApproval(estimateId){
   var r = rows[0];
   var names = await employeeNamesById([r.created_by]);
   var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
+  var slin = travel.odcSlins.find(function(s){ return s.slin_id === r.slin_id; });
+  var multiplier = parseFloat(r.fee_multiplier_used) || 1;
 
-  detail.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Travel Estimate — ' + escAttr(names[r.created_by] || '—') + '</div>'
+  var { data: travelerRows } = await supabaseClient.from('travel_estimate_travelers').select('*, demo_employees(full_name)').eq('estimate_id', estimateId).order('traveler_number');
+  travelerRows = travelerRows || [];
+
+  var nights = 0;
+  if(r.leave_date && r.return_date){
+    nights = Math.max(0, Math.round((new Date(r.return_date) - new Date(r.leave_date)) / 86400000));
+  }
+
+  var demographicsHtml = '<div class="resume-section"><div class="resume-section-title">Demographics</div>'
     + '<div class="profile-grid">'
     + travelReadOnlyField('Destination', r.destination_event)
     + travelReadOnlyField('Event Name', r.event_name)
-    + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
+    + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + ' (' + nights + ' nights)')
+    + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : '—')
     + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
-    + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.trip_lead_total) || 0).toFixed(2))
-    + travelReadOnlyField('EWW Total', '$' + (parseFloat(r.eww_total) || 0).toFixed(2))
-    + travelReadOnlyField('Grand Total', '$' + grand.toFixed(2))
-    + travelReadOnlyField('Billable to Prime (ODC)', '$' + (parseFloat(r.billable_trip_lead_total) || 0).toFixed(2))
-    + travelReadOnlyField('Grand Total to Prime', '$' + (parseFloat(r.billable_grand_total) || 0).toFixed(2))
+    + travelReadOnlyField('Fee Multiplier Used', multiplier ? multiplier.toFixed(4) + 'x' : '—')
+    + '</div></div>';
+
+  var travelersHtml = '<div class="resume-section"><div class="resume-section-title">Travelers / EWW (not marked up)</div>'
+    + '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Traveler</th><th>EWW Rate</th><th>EWW Hours</th><th>EWW Cost</th></tr></thead><tbody>'
+    + (travelerRows.length
+      ? travelerRows.map(function(t){
+          var cost = (parseFloat(t.eww_rate) || 0) * (parseFloat(t.eww_hours) || 0);
+          return '<tr><td>' + escAttr(t.demo_employees ? t.demo_employees.full_name : '—') + '</td><td>$' + (parseFloat(t.eww_rate) || 0).toFixed(2) + '</td><td>' + (parseFloat(t.eww_hours) || 0) + '</td><td>$' + cost.toFixed(2) + '</td></tr>';
+        }).join('')
+      : '<tr><td colspan="4">No traveler records found.</td></tr>')
+    + '</tbody></table></div></div>';
+
+  var lodgingCostTotal = (parseFloat(r.lodging_cost_per_night) || 0) * nights;
+  var lodgingHtml = teApprovalMarkupTable('Lodging', [
+    { label: 'Lodging (' + nights + ' nights × $' + (parseFloat(r.lodging_cost_per_night) || 0).toFixed(2) + ')', value: lodgingCostTotal },
+    { label: 'Lodging Fees', value: parseFloat(r.lodging_fees) || 0 },
+    { label: 'Lodging Taxes', value: parseFloat(r.lodging_taxes) || 0 }
+  ], multiplier)
+    + '<div class="profile-grid" style="margin-top:-8px;">'
+    + travelReadOnlyField('GSA Lodging Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_lodging_rate) || 0).toFixed(2))
+    + travelReadOnlyField('Meals (M&IE) Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_meals_rate) || 0).toFixed(2))
+    + '</div>';
+
+  var flightHtml = teApprovalMarkupTable('Flight', [
+    { label: 'Airfare (avg)', value: parseFloat(r.airfare_avg) || 0 },
+    { label: 'Baggage', value: parseFloat(r.baggage) || 0 },
+    { label: 'Airport Parking', value: parseFloat(r.airport_parking_transport) || 0 }
+  ], multiplier);
+
+  var transportationHtml = teApprovalMarkupTable('Transportation', [
+    { label: 'Rental Car', value: parseFloat(r.rental_car) || 0 },
+    { label: 'Gas', value: parseFloat(r.fuel_gas) || 0 },
+    { label: 'Parking', value: parseFloat(r.parking) || 0 },
+    { label: 'Tolls', value: parseFloat(r.tolls) || 0 },
+    { label: 'Rideshare Estimate', value: parseFloat(r.rideshare_estimate) || 0 },
+    { label: 'Mileage (Personal Vehicle)', value: parseFloat(r.mileage) || 0 }
+  ], multiplier);
+
+  var otherOdcHtml = teApprovalMarkupTable('Other ODC Costs', [
+    { label: 'Shipping (to)', value: parseFloat(r.shipping_to) || 0 },
+    { label: 'Shipping (back)', value: parseFloat(r.shipping_back) || 0 }
+  ], multiplier);
+
+  var totalsHtml = '<div class="tk-entry-card" style="margin-top:14px;">'
+    + '<div class="tk-pto-summary-row">'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val">$' + (parseFloat(r.trip_lead_total) || 0).toFixed(2) + '</div></div>'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val">$' + (parseFloat(r.eww_total) || 0).toFixed(2) + '</div></div>'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total</div><div class="tk-pto-stat-val">$' + grand.toFixed(2) + '</div></div>'
     + '</div>'
+    + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val">$' + (parseFloat(r.billable_trip_lead_total) || 0).toFixed(2) + '</div></div>'
+    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val">$' + (parseFloat(r.billable_grand_total) || 0).toFixed(2) + '</div></div>'
+    + '</div></div>';
+
+  detail.innerHTML = '<div class="tk-entry-card">'
+    + '<div class="tk-section-title">Travel Estimate — ' + escAttr(names[r.created_by] || '—') + '</div>'
+    + demographicsHtml + travelersHtml + lodgingHtml + flightHtml + transportationHtml + otherOdcHtml + totalsHtml
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'
     + '<div class="profile-actions">'

@@ -216,6 +216,23 @@ function switchScreen(name){
   if(name === 'settings'){ renderThemeToggle(); }
 }
 
+// ---------- Shared toast (brief, self-dismissing success/status message —
+// distinct from the blocking modal below) ----------
+var showToastTimer = null;
+function showToast(message){
+  var el = document.getElementById('app-toast');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'app-toast';
+    el.className = 'app-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.classList.add('active');
+  clearTimeout(showToastTimer);
+  showToastTimer = setTimeout(function(){ el.classList.remove('active'); }, 3000);
+}
+
 // ---------- Shared modal (used by the Dashboard drill-down popups and the
 // ODC Procurements "Close Commitment" flow) ----------
 function openModal(titleHtml, bodyHtml, footerHtml){

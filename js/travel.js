@@ -1208,6 +1208,11 @@ var texEstimatedCosts = { airfare: 0, parkingTransport: 0, baggage: 0, lodgingTo
 // texLoadReceiptsByCategory, read by texRenderCategoryReceipts.
 var texReceiptsByCategory = {};
 
+// Explanations for a category whose actual cost ran >10% over its estimate
+// (migration 0018 added travel_expenses.variance_notes, jsonb keyed by
+// category). Required at submit time for any category still over threshold.
+var texVarianceNotes = {};
+
 // One row per Actual Costs category — drives both texActualCostRow's
 // repeated markup and texEstimatedCosts' key names.
 var texCostCategories = [
@@ -1266,6 +1271,7 @@ async function loadMyExpenses(editId){
 
   texEstimatedCosts = texComputeEstimatedCosts(null);
   texReceiptsByCategory = {};
+  texVarianceNotes = {};
 
   try{
     if(texEditingId){
@@ -1292,6 +1298,7 @@ async function loadMyExpenses(editId){
         eww: parseFloat(texEditingRow.travel_estimates && texEditingRow.travel_estimates.eww_total) || 0
       };
       texEstimatedCosts = texComputeEstimatedCosts(texEditingRow.travel_estimates);
+      texVarianceNotes = texEditingRow.variance_notes || {};
       await texLoadReceiptsByCategory(texEditingRow.id);
     }
 
@@ -1312,11 +1319,24 @@ async function loadMyExpenses(editId){
 // (comparison against the linked estimate, see texComputeEstimatedCosts) |
 // category-scoped receipt upload + thumbnails (see texRenderCategoryReceipts).
 function texActualCostRow(label, fieldId, category, actualValue, estimatedValue){
-  return '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 150px 240px;align-items:end;margin-bottom:10px;">'
+  var varianceOver = texIsVarianceOver10Pct(actualValue, estimatedValue);
+  return '<div class="tk-pto-form-grid" style="grid-template-columns:160px 140px 1fr;align-items:end;margin-bottom:6px;">'
     + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label><input type="number" step="0.01" class="field-input" id="' + fieldId + '" value="' + (actualValue || 0) + '" oninput="texRecalc()"></div>'
     + '<div class="info-box"><div class="info-label">Estimated</div><div class="info-val" id="tex-estimated-' + category + '">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div>'
     + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
+    + '</div>'
+    + '<div class="warning-box" id="tex-variance-wrap-' + category + '" style="' + (varianceOver ? '' : 'display:none;') + 'margin-bottom:14px;">'
+    + '<div style="width:100%;"><div class="warning-box-title">' + escAttr(label) + ' is more than 10% over the estimate</div>'
+    + '<textarea class="info-edit-input" id="tex-variance-note-' + category + '" rows="2" placeholder="Explain the variance...">' + escAttr((texVarianceNotes && texVarianceNotes[category]) || '') + '</textarea></div>'
     + '</div>';
+}
+
+// Actual > estimated by more than 10% — guards against a divide-by-zero /
+// false-positive flag when nothing was estimated for this category at all.
+function texIsVarianceOver10Pct(actualValue, estimatedValue){
+  var actual = parseFloat(actualValue) || 0;
+  var estimated = parseFloat(estimatedValue) || 0;
+  return estimated > 0 && actual > estimated * 1.1;
 }
 
 // Builds the receipt thumbnails + upload button for one Actual Costs
@@ -1485,6 +1505,15 @@ function texRecalc(){
   document.getElementById('tex-total-eww').textContent = '$' + calc.ewwTotal.toFixed(2);
   document.getElementById('tex-total-grand').textContent = '$' + grand.toFixed(2);
   document.getElementById('tex-total-variance').textContent = (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2);
+
+  texCostCategories.forEach(function(c){
+    var fieldEl = document.getElementById(c.fieldId);
+    var wrapEl = document.getElementById('tex-variance-wrap-' + c.category);
+    if(!fieldEl || !wrapEl){ return; }
+    var over = texIsVarianceOver10Pct(fieldEl.value, texEstimatedCosts[c.estimatedKey]);
+    wrapEl.style.display = over ? '' : 'none';
+  });
+
   return calc;
 }
 
@@ -1524,6 +1553,12 @@ function renderTexReadOnlyDetail(r){
     + travelReadOnlyField('Variance vs. Estimate', (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2))
     + travelReadOnlyField('Supervisor Decision', r.supervisor_status)
     + '</div>'
+    + (Object.keys(r.variance_notes || {}).length
+      ? '<div class="resume-section"><div class="resume-section-title">Variance Explanations</div>' + Object.keys(r.variance_notes).map(function(cat){
+          var meta = texCostCategories.find(function(c){ return c.category === cat; });
+          return '<div class="warning-box"><div><div class="warning-box-title">' + escAttr(meta ? meta.label : cat) + '</div><div class="warning-box-text">' + escAttr(r.variance_notes[cat]) + '</div></div></div>';
+        }).join('') + '</div>'
+      : '')
     + '<div class="resume-section"><div class="resume-section-title">Receipts</div><div id="tex-receipts-list"></div></div>'
     + '<div class="profile-actions"><button class="btn-cancel" onclick="loadMyExpenses()">Back</button></div>'
     + '</div>';
@@ -1553,6 +1588,19 @@ async function texLoadReceipts(expenseId){
 // attaching a receipt before the user has explicitly saved) so both build
 // the travel_expenses row the same way. Mirrors the Travel Estimate side's
 // teBuildBody pattern.
+// Reads every category's variance-explanation textarea into a plain object
+// (only non-empty notes kept) — used both to persist variance_notes on save
+// and, at submit time, to check every over-threshold category has one.
+function texReadVarianceNotes(){
+  var notes = {};
+  texCostCategories.forEach(function(c){
+    var el = document.getElementById('tex-variance-note-' + c.category);
+    var val = el ? el.value.trim() : '';
+    if(val){ notes[c.category] = val; }
+  });
+  return notes;
+}
+
 function texBuildBody(targetStatus, inputs, estimateId){
   var calc = texCalc(inputs);
   var grand = calc.tripLeadTotal + calc.ewwTotal;
@@ -1567,7 +1615,7 @@ function texBuildBody(targetStatus, inputs, estimateId){
     per_diem_meals_rate: inputs.mealsRate, eww_rate: inputs.ewwRate, eww_hours_per_trainer: inputs.ewwHours,
     actual_per_diem_meals_total: calc.perDiemMealsTotal, actual_per_traveler_subtotal: calc.perTravelerSubtotal,
     actual_trip_lead_total: calc.tripLeadTotal, actual_total_odc: calc.tripLeadTotal, actual_eww_total: calc.ewwTotal,
-    variance_total: grand - estimateGrand, current_status: targetStatus
+    variance_total: grand - estimateGrand, variance_notes: texReadVarianceNotes(), current_status: targetStatus
   };
   if(targetStatus === 'submitted'){ body.supervisor_status = 'pending'; }
   return body;
@@ -1689,6 +1737,15 @@ async function submitTravelExpense(targetStatus){
   if(targetStatus === 'submitted'){
     if(!inputs.leaveDate || !inputs.returnDate){ errorEl.textContent = 'Actual leave and return dates are required to submit.'; return; }
     if(new Date(inputs.returnDate) < new Date(inputs.leaveDate)){ errorEl.textContent = 'Actual return date must be on or after leave date.'; return; }
+    var missingVarianceNote = texCostCategories.find(function(c){
+      var fieldEl = document.getElementById(c.fieldId);
+      var noteEl = document.getElementById('tex-variance-note-' + c.category);
+      return fieldEl && texIsVarianceOver10Pct(fieldEl.value, texEstimatedCosts[c.estimatedKey]) && (!noteEl || !noteEl.value.trim());
+    });
+    if(missingVarianceNote){
+      errorEl.textContent = 'Explain the variance for ' + missingVarianceNote.label + ' before submitting — it\'s more than 10% over the estimate.';
+      return;
+    }
   }
 
   var body = texBuildBody(targetStatus, inputs, estimateId);
@@ -1748,6 +1805,15 @@ async function openExpenseApproval(expenseId){
     ? receipts.map(function(rec){ return '<div class="resume-cart-item"><a href="' + rec.file_url + '" target="_blank">' + escAttr(rec.file_name || 'Receipt') + '</a></div>'; }).join('')
     : '<div class="tk-empty">No receipts attached.</div>';
 
+  var varianceNotes = r.variance_notes || {};
+  var varianceNoteKeys = Object.keys(varianceNotes);
+  var varianceNotesHtml = varianceNoteKeys.length
+    ? '<div class="resume-section"><div class="resume-section-title">Variance Explanations</div>' + varianceNoteKeys.map(function(cat){
+        var meta = texCostCategories.find(function(c){ return c.category === cat; });
+        return '<div class="warning-box"><div><div class="warning-box-title">' + escAttr(meta ? meta.label : cat) + '</div><div class="warning-box-text">' + escAttr(varianceNotes[cat]) + '</div></div></div>';
+      }).join('') + '</div>'
+    : '';
+
   detail.innerHTML = '<div class="tk-entry-card">'
     + '<div class="tk-section-title">Expense Report — ' + escAttr(names[r.created_by] || '—') + '</div>'
     + '<div class="profile-grid">'
@@ -1757,6 +1823,7 @@ async function openExpenseApproval(expenseId){
     + travelReadOnlyField('Actual Grand Total', '$' + grand.toFixed(2))
     + travelReadOnlyField('Variance vs. Estimate', (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2))
     + '</div>'
+    + varianceNotesHtml
     + '<div class="resume-section"><div class="resume-section-title">Receipts</div>' + receiptsHtml + '</div>'
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'

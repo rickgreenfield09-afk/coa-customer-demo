@@ -356,8 +356,8 @@ function teFormHtml(row, rejectionNote){
     + '<div class="cfd-two-col">'
     + '<div class="resume-section"><div class="resume-section-title">Lodging</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-gsa-lodging-rate">GSA Lodging Rate (per night)</label><input type="number" step="0.01" class="field-input" id="te-gsa-lodging-rate" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-meals-rate">Meals (M&amp;IE) Rate (per day)</label><input type="number" step="0.01" class="field-input" id="te-meals-rate" value="0" oninput="teRecalc()"></div>'
+    + '<div><label class="field-label" for="te-gsa-lodging-rate">GSA Lodging Rate (per night)</label>' + currencyInputHtml('te-gsa-lodging-rate', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-meals-rate">Meals (M&amp;IE) Rate (per day)</label>' + currencyInputHtml('te-meals-rate', 0, 'teRecalc') + '</div>'
     + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:auto 1fr 1fr 1fr;gap:16px;margin:4px 0 8px;align-items:end;">'
     + '<div><button type="button" class="btn-cancel" id="te-gsa-lookup-btn" onclick="teMaybeAutoLookupGsa()">Refresh GSA Rates</button></div>'
@@ -367,9 +367,9 @@ function teFormHtml(row, rejectionNote){
     + '</div>'
     + '<div class="login-error" id="te-gsa-lookup-error" style="text-align:left;margin-top:-4px;"></div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
-    + '<div><label class="field-label" for="te-lodging-cost">Lodging Cost (per night, requested)</label><input type="number" step="0.01" class="field-input" id="te-lodging-cost" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-lodging-fees">Lodging Fees</label><input type="number" step="0.01" class="field-input" id="te-lodging-fees" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-lodging-taxes">Lodging Taxes</label><input type="number" step="0.01" class="field-input" id="te-lodging-taxes" value="0" oninput="teRecalc()"></div>'
+    + '<div><label class="field-label" for="te-lodging-cost">Lodging Cost (per night, requested)</label>' + currencyInputHtml('te-lodging-cost', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-lodging-fees">Lodging Fees</label>' + currencyInputHtml('te-lodging-fees', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-lodging-taxes">Lodging Taxes</label>' + currencyInputHtml('te-lodging-taxes', 0, 'teRecalc') + '</div>'
     + '</div>'
     + '<div class="warning-box" id="te-lodging-warning" style="display:none;">'
     + '<div><div class="warning-box-title">Lodging cost exceeds GSA rate</div><div class="warning-box-text" id="te-lodging-warning-text"></div>'
@@ -377,28 +377,28 @@ function teFormHtml(row, rejectionNote){
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Flight</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-airfare">Airfare (avg)</label><input type="number" step="0.01" class="field-input" id="te-airfare" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-baggage">Baggage</label><input type="number" step="0.01" class="field-input" id="te-baggage" value="0" oninput="teRecalc()"></div>'
+    + '<div><label class="field-label" for="te-airfare">Airfare (avg)</label>' + currencyInputHtml('te-airfare', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-baggage">Baggage</label>' + currencyInputHtml('te-baggage', 0, 'teRecalc') + '</div>'
     + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-parking-transport">Airport Parking</label><input type="number" step="0.01" class="field-input" id="te-parking-transport" value="0" oninput="teRecalc()"></div>'
+    + '<div><label class="field-label" for="te-parking-transport">Airport Parking</label>' + currencyInputHtml('te-parking-transport', 0, 'teRecalc') + '</div>'
     + '<div></div>'
     + '</div></div>'
     + '</div>'
     + '<div class="cfd-two-col">'
     + '<div class="resume-section"><div class="resume-section-title">Other ODC Costs</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-shipping-to">Shipping (to)</label><input type="number" step="0.01" class="field-input" id="te-shipping-to" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-shipping-back">Shipping (back)</label><input type="number" step="0.01" class="field-input" id="te-shipping-back" value="0" oninput="teRecalc()"></div>'
+    + '<div><label class="field-label" for="te-shipping-to">Shipping (to)</label>' + currencyInputHtml('te-shipping-to', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-shipping-back">Shipping (back)</label>' + currencyInputHtml('te-shipping-back', 0, 'teRecalc') + '</div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Transportation</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
-    + '<div><label class="field-label" for="te-rental-car">Rental Car</label><input type="number" step="0.01" class="field-input" id="te-rental-car" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-fuel-gas">Gas</label><input type="number" step="0.01" class="field-input" id="te-fuel-gas" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-parking">Parking</label><input type="number" step="0.01" class="field-input" id="te-parking" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-tolls">Tolls</label><input type="number" step="0.01" class="field-input" id="te-tolls" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-rideshare">Rideshare Estimate</label><input type="number" step="0.01" class="field-input" id="te-rideshare" value="0" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-mileage">Mileage (Personal Vehicle)</label><input type="number" step="0.01" class="field-input" id="te-mileage" value="0" oninput="teRecalc()"></div>'
+    + '<div><label class="field-label" for="te-rental-car">Rental Car</label>' + currencyInputHtml('te-rental-car', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-fuel-gas">Gas</label>' + currencyInputHtml('te-fuel-gas', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-parking">Parking</label>' + currencyInputHtml('te-parking', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-tolls">Tolls</label>' + currencyInputHtml('te-tolls', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-rideshare">Rideshare Estimate</label>' + currencyInputHtml('te-rideshare', 0, 'teRecalc') + '</div>'
+    + '<div><label class="field-label" for="te-mileage">Mileage (Personal Vehicle)</label>' + currencyInputHtml('te-mileage', 0, 'teRecalc') + '</div>'
     + '</div></div>'
     + '</div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
@@ -435,22 +435,18 @@ function tePrefillForm(row){
   document.getElementById('te-trainers').value = teTravelers.length;
   document.getElementById('te-leave-date').value = row.leave_date || '';
   document.getElementById('te-return-date').value = row.return_date || '';
-  document.getElementById('te-gsa-lodging-rate').value = row.per_diem_lodging_rate || 0;
-  document.getElementById('te-lodging-cost').value = row.lodging_cost_per_night || 0;
-  document.getElementById('te-lodging-fees').value = row.lodging_fees || 0;
-  document.getElementById('te-lodging-taxes').value = row.lodging_taxes || 0;
-  document.getElementById('te-meals-rate').value = row.per_diem_meals_rate || 0;
-  document.getElementById('te-airfare').value = row.airfare_avg || 0;
-  document.getElementById('te-parking-transport').value = row.airport_parking_transport || 0;
-  document.getElementById('te-baggage').value = row.baggage || 0;
-  document.getElementById('te-rental-car').value = row.rental_car || 0;
-  document.getElementById('te-fuel-gas').value = row.fuel_gas || 0;
-  document.getElementById('te-parking').value = row.parking || 0;
-  document.getElementById('te-tolls').value = row.tolls || 0;
-  document.getElementById('te-rideshare').value = row.rideshare_estimate || 0;
-  document.getElementById('te-mileage').value = row.mileage || 0;
-  document.getElementById('te-shipping-to').value = row.shipping_to || 0;
-  document.getElementById('te-shipping-back').value = row.shipping_back || 0;
+  var teMoneyFieldMap = {
+    'te-gsa-lodging-rate': row.per_diem_lodging_rate, 'te-lodging-cost': row.lodging_cost_per_night,
+    'te-lodging-fees': row.lodging_fees, 'te-lodging-taxes': row.lodging_taxes,
+    'te-meals-rate': row.per_diem_meals_rate, 'te-airfare': row.airfare_avg,
+    'te-parking-transport': row.airport_parking_transport, 'te-baggage': row.baggage,
+    'te-rental-car': row.rental_car, 'te-fuel-gas': row.fuel_gas, 'te-parking': row.parking,
+    'te-tolls': row.tolls, 'te-rideshare': row.rideshare_estimate, 'te-mileage': row.mileage,
+    'te-shipping-to': row.shipping_to, 'te-shipping-back': row.shipping_back
+  };
+  Object.keys(teMoneyFieldMap).forEach(function(id){
+    document.getElementById(id).value = '$' + (parseFloat(teMoneyFieldMap[id]) || 0).toFixed(2);
+  });
 }
 
 // Travel days = 1.5x M&IE ONCE; full days (nights-1) = 1x M&IE each.
@@ -495,22 +491,22 @@ function teReadFormInputs(){
     leaveDate: document.getElementById('te-leave-date').value,
     returnDate: document.getElementById('te-return-date').value,
     trainers: teTravelers.length,
-    lodgingRate: parseFloat(document.getElementById('te-gsa-lodging-rate').value) || 0,
-    lodgingCost: parseFloat(document.getElementById('te-lodging-cost').value) || 0,
-    lodgingFees: parseFloat(document.getElementById('te-lodging-fees').value) || 0,
-    lodgingTaxes: parseFloat(document.getElementById('te-lodging-taxes').value) || 0,
-    mealsRate: parseFloat(document.getElementById('te-meals-rate').value) || 0,
-    airfare: parseFloat(document.getElementById('te-airfare').value) || 0,
-    parkingTransport: parseFloat(document.getElementById('te-parking-transport').value) || 0,
-    baggage: parseFloat(document.getElementById('te-baggage').value) || 0,
-    rentalCar: parseFloat(document.getElementById('te-rental-car').value) || 0,
-    fuelGas: parseFloat(document.getElementById('te-fuel-gas').value) || 0,
-    parking: parseFloat(document.getElementById('te-parking').value) || 0,
-    tolls: parseFloat(document.getElementById('te-tolls').value) || 0,
-    rideshare: parseFloat(document.getElementById('te-rideshare').value) || 0,
-    mileage: parseFloat(document.getElementById('te-mileage').value) || 0,
-    shippingTo: parseFloat(document.getElementById('te-shipping-to').value) || 0,
-    shippingBack: parseFloat(document.getElementById('te-shipping-back').value) || 0
+    lodgingRate: parseMoneyValue(document.getElementById('te-gsa-lodging-rate').value),
+    lodgingCost: parseMoneyValue(document.getElementById('te-lodging-cost').value),
+    lodgingFees: parseMoneyValue(document.getElementById('te-lodging-fees').value),
+    lodgingTaxes: parseMoneyValue(document.getElementById('te-lodging-taxes').value),
+    mealsRate: parseMoneyValue(document.getElementById('te-meals-rate').value),
+    airfare: parseMoneyValue(document.getElementById('te-airfare').value),
+    parkingTransport: parseMoneyValue(document.getElementById('te-parking-transport').value),
+    baggage: parseMoneyValue(document.getElementById('te-baggage').value),
+    rentalCar: parseMoneyValue(document.getElementById('te-rental-car').value),
+    fuelGas: parseMoneyValue(document.getElementById('te-fuel-gas').value),
+    parking: parseMoneyValue(document.getElementById('te-parking').value),
+    tolls: parseMoneyValue(document.getElementById('te-tolls').value),
+    rideshare: parseMoneyValue(document.getElementById('te-rideshare').value),
+    mileage: parseMoneyValue(document.getElementById('te-mileage').value),
+    shippingTo: parseMoneyValue(document.getElementById('te-shipping-to').value),
+    shippingBack: parseMoneyValue(document.getElementById('te-shipping-back').value)
   };
 }
 
@@ -773,8 +769,8 @@ async function teFetchGsaRates(city, state){
       console.error(error || (data && data.error));
       return;
     }
-    if(data.lodgingRate != null){ document.getElementById('te-gsa-lodging-rate').value = data.lodgingRate; }
-    if(data.mealsRate != null){ document.getElementById('te-meals-rate').value = data.mealsRate; }
+    if(data.lodgingRate != null){ document.getElementById('te-gsa-lodging-rate').value = '$' + parseFloat(data.lodgingRate).toFixed(2); }
+    if(data.mealsRate != null){ document.getElementById('te-meals-rate').value = '$' + parseFloat(data.mealsRate).toFixed(2); }
     teRecalc();
   }catch(e){
     errorEl.textContent = 'Couldn\'t look up GSA rates. Enter manually.';
@@ -1351,29 +1347,30 @@ function texActualCostsGridHtml(){
   }).join('');
 }
 
-// ---------- Currency-formatted actual-cost inputs ----------
+// ---------- Currency-formatted inputs (shared by both the Estimate and
+// Expense forms — te*/tex* recalc functions are passed in by name) ----------
 // type="number" can't display "$400.00" (browsers reject non-numeric
 // characters in a number input), so these are plain text inputs with
 // inputmode="decimal" — cleared to blank on focus (instead of leaving a
 // stale "0" the user has to select and delete) and formatted as currency
 // on blur. Every place that reads one of these fields' raw value uses
-// texParseMoney instead of parseFloat so a "$400.00"-formatted value still
-// parses correctly.
-function texParseMoney(v){
+// parseMoneyValue instead of parseFloat so a "$400.00"-formatted value
+// still parses correctly.
+function parseMoneyValue(v){
   var n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''));
   return isNaN(n) ? 0 : n;
 }
-function texCurrencyInputHtml(fieldId, value){
-  var n = texParseMoney(value);
-  return '<input type="text" inputmode="decimal" class="field-input" id="' + fieldId + '" value="$' + n.toFixed(2) + '" onfocus="texCurrencyFocus(this)" onblur="texCurrencyBlur(this)" oninput="texRecalc()">';
+function currencyInputHtml(fieldId, value, recalcFnName){
+  var n = parseMoneyValue(value);
+  return '<input type="text" inputmode="decimal" class="field-input" id="' + fieldId + '" value="$' + n.toFixed(2) + '" onfocus="currencyFocus(this)" onblur="currencyBlur(this,\'' + recalcFnName + '\')" oninput="' + recalcFnName + '()">';
 }
-function texCurrencyFocus(el){
-  var n = texParseMoney(el.value);
+function currencyFocus(el){
+  var n = parseMoneyValue(el.value);
   el.value = n === 0 ? '' : String(n);
 }
-function texCurrencyBlur(el){
-  el.value = '$' + texParseMoney(el.value).toFixed(2);
-  texRecalc();
+function currencyBlur(el, recalcFnName){
+  el.value = '$' + parseMoneyValue(el.value).toFixed(2);
+  if(recalcFnName && typeof window[recalcFnName] === 'function'){ window[recalcFnName](); }
 }
 
 // One self-contained "cell" per Actual Costs category, meant to sit inside
@@ -1387,7 +1384,7 @@ function texActualCostRow(label, fieldId, category, actualValue, estimatedValue)
   var varianceOver = texIsVarianceOver10Pct(actualValue, estimatedValue);
   return '<div style="margin-bottom:18px;">'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
-    + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label>' + texCurrencyInputHtml(fieldId, actualValue) + '</div>'
+    + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label>' + currencyInputHtml(fieldId, actualValue, 'texRecalc') + '</div>'
     + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-estimated-' + category + '" style="margin:0;">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div></div>'
     + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
     + '</div>'
@@ -1401,8 +1398,8 @@ function texActualCostRow(label, fieldId, category, actualValue, estimatedValue)
 // Actual > estimated by more than 10% — guards against a divide-by-zero /
 // false-positive flag when nothing was estimated for this category at all.
 function texIsVarianceOver10Pct(actualValue, estimatedValue){
-  var actual = texParseMoney(actualValue);
-  var estimated = texParseMoney(estimatedValue);
+  var actual = parseMoneyValue(actualValue);
+  var estimated = parseMoneyValue(estimatedValue);
   return estimated > 0 && actual > estimated * 1.1;
 }
 
@@ -1471,7 +1468,7 @@ function texAdditionalExpenseRowHtml(c){
   return '<div style="margin-bottom:18px;position:relative;" id="tex-additional-row-' + c.category + '">'
     + '<button type="button" class="btn-remove-row" style="position:absolute;top:0;right:0;font-size:18px;line-height:1;font-weight:700;" title="Remove this expense" onclick="texRemoveAdditionalExpense(\'' + c.category + '\')">&times;</button>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
-    + '<div><label class="field-label" for="' + c.fieldId + '">' + escAttr(c.label) + '</label>' + texCurrencyInputHtml(c.fieldId, 0) + '</div>'
+    + '<div><label class="field-label" for="' + c.fieldId + '">' + escAttr(c.label) + '</label>' + currencyInputHtml(c.fieldId, 0, 'texRecalc') + '</div>'
     + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" style="margin:0;">—</div></div></div>'
     + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + c.category + '">' + texRenderCategoryReceipts(c.category) + '</div></div>'
     + '</div>'
@@ -1622,7 +1619,7 @@ function texReadFormInputs(){
   // as 0, same as if the user had left it blank.
   texCostCategories.forEach(function(c){
     var el = document.getElementById(c.fieldId);
-    inputs[c.estimatedKey] = el ? texParseMoney(el.value) : 0;
+    inputs[c.estimatedKey] = el ? parseMoneyValue(el.value) : 0;
   });
   return inputs;
 }

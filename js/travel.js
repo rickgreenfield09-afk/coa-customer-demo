@@ -734,7 +734,19 @@ async function submitTravelEstimate(targetStatus){
     });
 
     if(targetStatus === 'submitted'){
-      notifySelf('Travel estimate submitted', '<p>Your travel estimate for <strong>' + escAttr(body.destination_event || body.event_name || 'your trip') + '</strong> has been submitted. Switch to your Supervisor view to review and approve it.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+      // Two separate sends (not one email with a CC) — a submitter's copy
+      // and a distinct "action needed" copy for whoever reviews it as
+      // Supervisor. Both land in the same real inbox in this demo (one
+      // person plays every persona via the role picker — send-report can
+      // only ever email the calling user's own address), but they're
+      // genuinely separate messages, not the same email addressed twice.
+      var emailData = await teFetchEstimateDetailData(newId);
+      if(emailData){
+        var tripLabel = escAttr(body.destination_event || body.event_name || 'your trip');
+        var emailHtml = buildTravelEstimateEmailHtml(emailData, { showBillableToPrime: false });
+        notifySelf('Travel estimate submitted — ' + tripLabel, '<p>Your travel estimate has been submitted. Here\'s a copy for your records.</p>' + emailHtml);
+        notifySelf('Action needed: review as Supervisor — ' + tripLabel, '<p>A travel estimate needs your review. Switch to your Supervisor view to approve it.</p>' + emailHtml);
+      }
     }
 
     teEditingId = null; teEditingRow = null; teFormDirty = false;
@@ -967,14 +979,14 @@ function teApprovalMarkupTable(sectionLabel, items, multiplier){
     + '</tbody></table></div></div>';
 }
 
-async function openEstimateApproval(estimateId){
-  var detail = document.getElementById('travel-approval-detail');
-  detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
+// Shared by the on-screen Supervisor approval detail (openEstimateApproval)
+// and the itemized emails (buildTravelEstimateEmailHtml) so both read the
+// estimate/travelers/nights/multiplier the same way, once.
+async function teFetchEstimateDetailData(estimateId){
   var { data: rows } = await supabaseClient.from('travel_estimates').select('*').eq('id', estimateId).limit(1);
-  if(!rows || !rows.length){ detail.innerHTML = ''; return; }
+  if(!rows || !rows.length){ return null; }
   var r = rows[0];
   var names = await employeeNamesById([r.created_by]);
-  var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
   var slin = travel.odcSlins.find(function(s){ return s.slin_id === r.slin_id; });
   var multiplier = parseFloat(r.fee_multiplier_used) || 1;
 
@@ -985,6 +997,96 @@ async function openEstimateApproval(estimateId){
   if(r.leave_date && r.return_date){
     nights = Math.max(0, Math.round((new Date(r.return_date) - new Date(r.leave_date)) / 86400000));
   }
+
+  return { r: r, names: names, slin: slin, multiplier: multiplier, travelerRows: travelerRows, nights: nights };
+}
+
+// Itemized HTML email — inline-styled (email clients strip external/app
+// CSS, same reasoning as dashboard.js's buildReportHtml) mirroring the same
+// sections as the on-screen Supervisor approval detail above. One template,
+// two modes: showBillableToPrime adds the fee-marked-up column next to
+// every ODC line item (used once the estimate reaches the Prime stage);
+// without it, only the actual requested amounts show (the submitter's own
+// copy, and the Supervisor's copy of a fresh submission).
+function buildTravelEstimateEmailHtml(data, opts){
+  opts = opts || {};
+  var showBillable = !!opts.showBillableToPrime;
+  var r = data.r, slin = data.slin, multiplier = data.multiplier, travelerRows = data.travelerRows, nights = data.nights;
+  var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
+  var appUrl = window.location.origin + window.location.pathname;
+
+  var tableStyle = 'width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;';
+  var thStyle = 'text-align:left;padding:6px 8px;border-bottom:2px solid #2E3440;color:#5C607E;font-size:11px;text-transform:uppercase;';
+  var tdStyle = 'padding:6px 8px;border-bottom:1px solid #E5E7EB;';
+  var h3Style = 'font-size:14px;margin:20px 0 8px;color:#122A54;';
+
+  function totalsRow(label, value){
+    return '<tr><td style="' + tdStyle + 'color:#5C607E;">' + escAttr(label) + '</td><td style="' + tdStyle + '"><strong>$' + value.toFixed(2) + '</strong></td></tr>';
+  }
+  function markupTable(sectionLabel, items){
+    var header = '<th style="' + thStyle + '">Item</th><th style="' + thStyle + '">Requested</th>' + (showBillable ? '<th style="' + thStyle + '">Billable to Prime</th>' : '');
+    var body = items.map(function(it){
+      var billable = it.value * multiplier;
+      return '<tr><td style="' + tdStyle + '">' + escAttr(it.label) + '</td><td style="' + tdStyle + '">$' + it.value.toFixed(2) + '</td>' + (showBillable ? '<td style="' + tdStyle + '">$' + billable.toFixed(2) + '</td>' : '') + '</tr>';
+    }).join('');
+    return '<h3 style="' + h3Style + '">' + escAttr(sectionLabel) + '</h3><table style="' + tableStyle + '"><tr>' + header + '</tr>' + body + '</table>';
+  }
+
+  var lodgingCostTotal = (parseFloat(r.lodging_cost_per_night) || 0) * nights;
+
+  return '<div style="font-family:Arial,sans-serif;color:#1B1D22;max-width:640px;">'
+    + '<h2 style="font-size:18px;color:#122A54;margin-bottom:4px;">' + escAttr(r.destination_event || '—') + (r.event_name ? ' — ' + escAttr(r.event_name) : '') + '</h2>'
+    + '<p style="color:#5C607E;font-size:13px;margin-top:0;">' + formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + ' (' + nights + ' nights)' + (slin ? ' · SLIN ' + escAttr(slin.slin_code) : '') + '</p>'
+    + markupTable('Lodging', [
+        { label: 'Lodging (' + nights + ' nights × $' + (parseFloat(r.lodging_cost_per_night) || 0).toFixed(2) + ')', value: lodgingCostTotal },
+        { label: 'Lodging Fees', value: parseFloat(r.lodging_fees) || 0 },
+        { label: 'Lodging Taxes', value: parseFloat(r.lodging_taxes) || 0 }
+      ])
+    + markupTable('Flight', [
+        { label: 'Airfare (avg)', value: parseFloat(r.airfare_avg) || 0 },
+        { label: 'Baggage', value: parseFloat(r.baggage) || 0 },
+        { label: 'Airport Parking', value: parseFloat(r.airport_parking_transport) || 0 }
+      ])
+    + markupTable('Transportation', [
+        { label: 'Rental Car', value: parseFloat(r.rental_car) || 0 },
+        { label: 'Gas', value: parseFloat(r.fuel_gas) || 0 },
+        { label: 'Parking', value: parseFloat(r.parking) || 0 },
+        { label: 'Tolls', value: parseFloat(r.tolls) || 0 },
+        { label: 'Rideshare Estimate', value: parseFloat(r.rideshare_estimate) || 0 },
+        { label: 'Mileage (Personal Vehicle)', value: parseFloat(r.mileage) || 0 }
+      ])
+    + markupTable('Other ODC Costs', [
+        { label: 'Shipping (to)', value: parseFloat(r.shipping_to) || 0 },
+        { label: 'Shipping (back)', value: parseFloat(r.shipping_back) || 0 }
+      ])
+    + '<h3 style="' + h3Style + '">Travelers / EWW (not marked up)</h3>'
+    + '<table style="' + tableStyle + '"><tr><th style="' + thStyle + '">Traveler</th><th style="' + thStyle + '">EWW Rate</th><th style="' + thStyle + '">EWW Hours</th><th style="' + thStyle + '">EWW Cost</th></tr>'
+    + (travelerRows.length
+      ? travelerRows.map(function(t){
+          var cost = (parseFloat(t.eww_rate) || 0) * (parseFloat(t.eww_hours) || 0);
+          return '<tr><td style="' + tdStyle + '">' + escAttr(t.demo_employees ? t.demo_employees.full_name : '—') + '</td><td style="' + tdStyle + '">$' + (parseFloat(t.eww_rate) || 0).toFixed(2) + '</td><td style="' + tdStyle + '">' + (parseFloat(t.eww_hours) || 0) + '</td><td style="' + tdStyle + '">$' + cost.toFixed(2) + '</td></tr>';
+        }).join('')
+      : '<tr><td style="' + tdStyle + '" colspan="4">No traveler records found.</td></tr>')
+    + '</table>'
+    + '<h3 style="' + h3Style + '">Totals</h3>'
+    + '<table style="' + tableStyle + '">'
+    + totalsRow('Trip Lead Total', parseFloat(r.trip_lead_total) || 0)
+    + totalsRow('EWW Total', parseFloat(r.eww_total) || 0)
+    + totalsRow('Grand Total', grand)
+    + (showBillable ? totalsRow('Billable to Prime (ODC)', parseFloat(r.billable_trip_lead_total) || 0) : '')
+    + (showBillable ? totalsRow('Grand Total to Prime', parseFloat(r.billable_grand_total) || 0) : '')
+    + '</table>'
+    + '<p style="margin-top:20px;"><a href="' + appUrl + '" style="color:#2AB8A6;">Open the app</a></p>'
+    + '</div>';
+}
+
+async function openEstimateApproval(estimateId){
+  var detail = document.getElementById('travel-approval-detail');
+  detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
+  var data = await teFetchEstimateDetailData(estimateId);
+  if(!data){ detail.innerHTML = ''; return; }
+  var r = data.r, names = data.names, slin = data.slin, multiplier = data.multiplier, travelerRows = data.travelerRows, nights = data.nights;
+  var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
 
   var demographicsHtml = '<div class="resume-section"><div class="resume-section-title">Demographics</div>'
     + '<div class="profile-grid">'
@@ -1087,7 +1189,16 @@ async function estimateApprovalAction(estimateId, decision){
 
     var approvalNote = noteField ? noteField.value.trim() : '';
     if(decision === 'supervisor_approved'){
-      notifySelf('Travel estimate approved internally', '<p>Your travel estimate has been approved internally. Switch to your Prime view to give final authorization.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
+      // Same "two separate sends, one inbox" pattern as submit — now with
+      // the Billable-to-Prime markup included, since this is the approved
+      // total the Prime will actually see and act on.
+      var emailData = await teFetchEstimateDetailData(estimateId);
+      if(emailData){
+        var tripLabel = escAttr(emailData.r.destination_event || emailData.r.event_name || 'the trip');
+        var emailHtml = buildTravelEstimateEmailHtml(emailData, { showBillableToPrime: true });
+        notifySelf('Travel estimate approved — ' + tripLabel, '<p>You approved this travel estimate internally. Here\'s a copy including the Prime-billable totals.</p>' + emailHtml);
+        notifySelf('Action needed: Prime authorization — ' + tripLabel, '<p>A travel estimate is ready for your authorization. Switch to your Prime view to review and authorize it.</p>' + emailHtml);
+      }
     }else{
       notifySelf('Travel estimate ' + decision, '<p>You ' + decision + ' a travel estimate' + (approvalNote ? ': ' + escAttr(approvalNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
     }

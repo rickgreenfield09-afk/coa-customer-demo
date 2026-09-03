@@ -1227,7 +1227,7 @@ async function openEstimateApproval(estimateId){
   var lodgingHtml = teApprovalMarkupTable('Lodging', [
     { label: 'Total Lodging Cost (incl. taxes & fees)', value: parseFloat(r.lodging_cost_total) || 0 }
   ], multiplier)
-    + '<div class="profile-grid" style="margin-top:-8px;">'
+    + '<div class="profile-grid" style="margin-top:14px;">'
     + travelReadOnlyField('Room Cost (subject to per diem limit)', '$' + (parseFloat(r.lodging_room_cost) || 0).toFixed(2))
     + travelReadOnlyField('GSA Lodging Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_lodging_rate) || 0).toFixed(2))
     + travelReadOnlyField('Meals (M&IE) Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_meals_rate) || 0).toFixed(2))

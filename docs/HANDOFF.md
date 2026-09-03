@@ -6,7 +6,7 @@ plan (a lot has changed/expanded since the first draft of this doc).
 
 ## What this is
 
-A prospect-facing demo for "Axiom Forward Consulting" (fictional), showing off two
+A prospect-facing demo for "Cyber Offset Alliance" (fictional), showing off two
 features destined for the real COA portal's "for purchase" customer module: a Contract
 Financial Dashboard (CLIN/SLIN burndown, funding, ODC commitments) and a full Travel
 Estimate/Expense Report workflow. Supabase + Vercel, no framework, no build step beyond

@@ -2,7 +2,7 @@
 
 Prospect-facing demo of the Contract Financial Dashboard (CLIN/SLIN burndown, ODC
 commitments) and Travel estimate/reimbursement workflow, seeded with 3-4 years of fake
-historical data for a fictional company, "Axiom Forward Consulting."
+historical data for a fictional company, "Cyber Offset Alliance."
 
 This is a **standalone commercial build**, separate from the GCC-track COA Self Service
 Portal. Stack: Supabase (Postgres + Auth + Storage) + plain HTML/CSS/JS + Vercel. No

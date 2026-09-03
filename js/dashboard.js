@@ -530,7 +530,7 @@ function buildReportHtml(){
 }
 
 function companyDisplayName(){
-  return (currentProfile && currentProfile.display_company_name) || 'Axiom Forward Consulting';
+  return (currentProfile && currentProfile.display_company_name) || 'Cyber Offset Alliance';
 }
 
 async function emailReport(){

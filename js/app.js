@@ -127,7 +127,7 @@ async function showApp(session){
   // migration 0015) replaces the placeholder everywhere post-login. The
   // login screen itself stays generic — there's no profile yet pre-auth.
   var companyNameEl = document.getElementById('header-company-name');
-  if(companyNameEl){ companyNameEl.textContent = (currentProfile && currentProfile.display_company_name) || 'Axiom Forward Consulting'; }
+  if(companyNameEl){ companyNameEl.textContent = (currentProfile && currentProfile.display_company_name) || 'Cyber Offset Alliance'; }
 
   if(currentProfile && currentProfile.active_persona_id){
     document.getElementById('switch-role-btn').style.display = '';

@@ -1553,8 +1553,10 @@ async function loadMyExpenses(editId){
 
   try{
     if(texEditingId){
-      var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number)').eq('id', texEditingId).limit(1);
+      var { data: rows, error: editRowError } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number)').eq('id', texEditingId).limit(1);
+      if(editRowError){ throw editRowError; }
       if(rows && rows.length){ texEditingRow = rows[0]; }
+      else{ throw new Error('Expense report ' + texEditingId + ' was not found.'); }
     }
 
     if(texEditingRow && texEditingRow.current_status !== 'draft'){
@@ -1564,8 +1566,10 @@ async function loadMyExpenses(editId){
     }
 
     if(!texEditingRow){
-      var { data: approved } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number').eq('created_by', travel.employeeId).eq('status', 'approved');
-      var { data: existing } = await supabaseClient.from('travel_expenses').select('estimate_id').eq('created_by', travel.employeeId);
+      var { data: approved, error: approvedError } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number').eq('created_by', travel.employeeId).eq('status', 'approved');
+      if(approvedError){ throw approvedError; }
+      var { data: existing, error: existingError } = await supabaseClient.from('travel_expenses').select('estimate_id').eq('created_by', travel.employeeId);
+      if(existingError){ throw existingError; }
       var takenIds = (existing || []).map(function(r){ return r.estimate_id; });
       texAvailableEstimates = (approved || []).filter(function(e){ return takenIds.indexOf(e.id) === -1; });
     }
@@ -1594,7 +1598,7 @@ async function loadMyExpenses(editId){
     }
     texRecalc();
   }catch(e){
-    content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">Couldn\'t load expense reports</div><div class="placeholder-sub">Try refreshing the page.</div></div>';
+    content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">Couldn\'t load expense reports</div><div class="placeholder-sub">' + escAttr(e.message || 'Try refreshing the page.') + '</div></div>';
     console.error(e);
   }
 }

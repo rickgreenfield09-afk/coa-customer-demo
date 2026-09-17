@@ -36,10 +36,14 @@
         <input type="text" id="login-title" class="field-input" placeholder="Program Manager" autocomplete="organization-title">
         <label class="field-label" for="login-email">Email</label>
         <input type="email" id="login-email" class="field-input" placeholder="you@company.com" autocomplete="username">
-        <button class="btn btn-primary" id="login-btn" onclick="handleSendMagicLink()">Send Magic Link</button>
+        <button class="btn btn-primary" id="login-btn" onclick="handleSendMagicLink()">Send Sign-In Code</button>
       </div>
       <div id="login-sent" style="display:none;">
-        <div class="placeholder-sub" style="text-align:center;">Check your email for a sign-in link. You can close this tab.</div>
+        <div class="placeholder-sub" style="text-align:center;">Enter the code we emailed you.</div>
+        <label class="field-label" for="login-code">Code</label>
+        <input type="text" id="login-code" class="field-input" placeholder="12345678" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
+        <button class="btn btn-primary" id="login-verify-btn" onclick="handleVerifyCode()">Verify Code</button>
+        <button class="btn-logout" id="login-resend-btn" onclick="handleSendMagicLink()" style="margin-top:8px;">Resend Code</button>
       </div>
       <div class="login-error" id="login-error"></div>
     </div>

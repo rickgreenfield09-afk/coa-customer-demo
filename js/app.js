@@ -51,18 +51,29 @@ async function ensurePersonasLoaded(){
 
 // ---------- Auth ----------
 
+// Login email — stashed so handleVerifyCode() (and Resend) know who the
+// code belongs to without re-reading the (now hidden) email field.
+var pendingLoginEmail = null;
+
 async function handleSendMagicLink(){
   var name = document.getElementById('login-name').value.trim();
   var company = document.getElementById('login-company').value.trim();
   var title = document.getElementById('login-title').value.trim();
-  var email = document.getElementById('login-email').value.trim();
+  var email = document.getElementById('login-email').value.trim() || pendingLoginEmail;
   var errorEl = document.getElementById('login-error');
   errorEl.textContent = '';
-  if(!name || !company || !email){ errorEl.textContent = 'Name, Company, and Email are required.'; return; }
+  if(!email || (document.getElementById('login-form').style.display !== 'none' && (!name || !company))){
+    errorEl.textContent = 'Name, Company, and Email are required.';
+    return;
+  }
 
   var btn = document.getElementById('login-btn');
   btn.disabled = true;
   try{
+    // A numeric code, not a clickable link — Outlook Safe Links and similar
+    // corporate email scanners prefetch links server-side, which burns a
+    // one-time magic-link token before the human ever clicks it. A code
+    // typed in by hand can't be consumed that way.
     // shouldCreateUser: true — self-serve signup. handle_new_auth_user()
     // (Supabase trigger, migration 0015) only runs on a genuine new
     // auth.users row, so this metadata is ignored for a returning user;
@@ -71,15 +82,41 @@ async function handleSendMagicLink(){
       email: email,
       options: {
         shouldCreateUser: true,
-        data: { full_name: name, company_name: company, title: title || null },
-        emailRedirectTo: window.location.origin + window.location.pathname
+        data: { full_name: name, company_name: company, title: title || null }
       }
     });
     if(error){ throw error; }
+    pendingLoginEmail = email;
     document.getElementById('login-form').style.display = 'none';
     document.getElementById('login-sent').style.display = 'block';
+    document.getElementById('login-code').value = '';
+    document.getElementById('login-code').focus();
   }catch(e){
-    errorEl.textContent = e.message || 'Could not send the magic link — try again.';
+    errorEl.textContent = e.message || 'Could not send the code — try again.';
+    console.error(e);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+async function handleVerifyCode(){
+  var code = document.getElementById('login-code').value.trim();
+  var errorEl = document.getElementById('login-error');
+  errorEl.textContent = '';
+  if(!pendingLoginEmail || !code){ errorEl.textContent = 'Enter the code from your email.'; return; }
+
+  var btn = document.getElementById('login-verify-btn');
+  btn.disabled = true;
+  try{
+    var { error } = await supabaseClient.auth.verifyOtp({
+      email: pendingLoginEmail,
+      token: code,
+      type: 'email'
+    });
+    if(error){ throw error; }
+    // onAuthStateChange picks up the new session and calls showApp().
+  }catch(e){
+    errorEl.textContent = e.message || 'That code is invalid or expired — try resending.';
     console.error(e);
   }finally{
     btn.disabled = false;
@@ -103,7 +140,9 @@ function showLogin(){
   document.getElementById('login-form').style.display = 'block';
   document.getElementById('login-sent').style.display = 'none';
   document.getElementById('login-email').value = '';
+  document.getElementById('login-code').value = '';
   document.getElementById('login-error').textContent = '';
+  pendingLoginEmail = null;
   currentProfile = null;
 }
 

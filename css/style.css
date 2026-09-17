@@ -110,6 +110,13 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .modal-text{font-size:13px;color:var(--sub);margin-bottom:20px;line-height:1.5;}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;}
 
+/* ---------- Feedback widget ---------- */
+.feedback-fab{position:fixed;right:20px;bottom:20px;z-index:90;background:var(--header);color:var(--text);border:1px solid var(--border);border-radius:999px;padding:10px 18px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.35);transition:all 0.15s;}
+.feedback-fab:hover{background:var(--teal);color:var(--void);border-color:var(--teal);}
+.feedback-modal .modal-box{max-width:460px;text-align:left;}
+.feedback-modal textarea.field-input{resize:vertical;min-height:70px;font-family:'DM Sans',sans-serif;}
+.feedback-success{font-size:13px;color:var(--teal);text-align:center;padding:20px 0;}
+
 /* ---------- Generic cards / forms ---------- */
 .tk-entry-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:24px;}
 .tk-section-title{font-size:13px;font-weight:700;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;}

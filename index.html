@@ -190,6 +190,58 @@
         <div id="odc-content"><div class="tk-empty">Loading...</div></div>
       </div>
     </main>
+
+    <!-- Demo feedback widget — only reachable inside app-shell, i.e. after
+         OTP verification, so every submission carries a known user email. -->
+    <button type="button" class="feedback-fab" id="feedback-fab" onclick="openFeedbackModal()">Demo Feedback</button>
+  </div>
+
+  <div class="modal-overlay feedback-modal" id="feedback-modal" onclick="if(event.target===this){closeFeedbackModal();}">
+    <div class="modal-box">
+      <div class="modal-title">Demo Feedback</div>
+      <div id="feedback-form-wrap">
+        <label class="field-label" for="feedback-type">Type</label>
+        <select class="field-input" id="feedback-type">
+          <option value="Bug">Bug</option>
+          <option value="UX-Usability Issue">UX / Usability Issue</option>
+          <option value="Feature Suggestion">Feature Suggestion</option>
+          <option value="Other">Other</option>
+        </select>
+        <label class="field-label" for="feedback-screen">Which screen does this relate to?</label>
+        <select class="field-input" id="feedback-screen">
+          <option value="Login">Login</option>
+          <option value="Dashboard">Dashboard</option>
+          <option value="Travel">Travel</option>
+          <option value="Contract Data">Contract Data</option>
+          <option value="ODC Procurements">ODC Procurements</option>
+          <option value="Settings">Settings</option>
+          <option value="Other">Other</option>
+        </select>
+        <label class="field-label" for="feedback-severity">How severe is this?</label>
+        <select class="field-input" id="feedback-severity">
+          <option value="Low - minor annoyance">Low — minor annoyance</option>
+          <option value="Medium - impacts workflow">Medium — impacts workflow</option>
+          <option value="High - blocks a task">High — blocks a task</option>
+          <option value="Blocking - can't use the app">Blocking — can't use the app</option>
+          <option value="I'm not sure">I'm not sure</option>
+        </select>
+        <label class="field-label" for="feedback-description">Describe the issue or suggestion</label>
+        <textarea class="field-input" id="feedback-description" placeholder="What happened, or what would you like to see?"></textarea>
+        <label class="field-label" for="feedback-repro">Steps to reproduce <span style="text-transform:none;">(bugs only)</span></label>
+        <textarea class="field-input" id="feedback-repro" placeholder="What did you do right before this happened?"></textarea>
+        <div class="login-error" id="feedback-error"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn-logout" onclick="closeFeedbackModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" style="width:auto;" id="feedback-submit-btn" onclick="submitFeedback()">Send Feedback</button>
+        </div>
+      </div>
+      <div id="feedback-success-wrap" style="display:none;">
+        <div class="feedback-success">Thanks — your feedback was sent.</div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" style="width:auto;" onclick="closeFeedbackModal()">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Shared modal (app.js openModal/closeModal) — used by the Dashboard
@@ -209,6 +261,7 @@
   <script src="js/travel.js"></script>
   <script src="js/burndown.js"></script>
   <script src="js/odc.js"></script>
+  <script src="js/feedback.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

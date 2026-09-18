@@ -1,10 +1,10 @@
 // submit-feedback — Supabase Edge Function
 //
-// Accepts demo feedback from the floating "Demo Feedback" widget and
-// forwards it server-side to a Power Automate "When an HTTP request is
-// received" trigger, which writes the item into the SharePoint feedback
-// list. The Power Automate trigger URL never reaches the browser (set as
-// an Edge Function secret: FEEDBACK_FLOW_URL).
+// Accepts demo feedback from the floating "Demo Feedback" widget and emails
+// it (single-line JSON body, subject prefix [COA-FEEDBACK]) via Resend to a
+// tenant mailbox, where a Power Automate "When a new email arrives" flow
+// parses it into the SharePoint feedback list. Uses the same RESEND_API_KEY
+// and REPORT_FROM_EMAIL secrets as send-report, plus FEEDBACK_TO_EMAIL.
 //
 // The caller's email is always taken from their verified Supabase auth
 // session, never from the request body — the widget only appears inside
@@ -58,28 +58,41 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Field too long' }), { status: 400, headers: corsHeaders });
     }
 
-    const flowUrl = Deno.env.get('FEEDBACK_FLOW_URL');
-    if (!flowUrl) {
+    const resendKey = Deno.env.get('RESEND_API_KEY');
+    const fromAddress = Deno.env.get('REPORT_FROM_EMAIL');
+    const toAddress = Deno.env.get('FEEDBACK_TO_EMAIL');
+    if (!resendKey || !fromAddress || !toAddress) {
       return new Response(JSON.stringify({ error: 'Feedback submission is not configured' }), { status: 500, headers: corsHeaders });
     }
 
-    const flowRes = await fetch(flowUrl, {
+    const item = {
+      Email: user.email,
+      DateSubmitted: dateSubmitted || new Date().toISOString(),
+      FeedbackType: String(feedbackType).slice(0, 200),
+      ScreenName: String(screenName).slice(0, 200),
+      Severity: String(severity).slice(0, 200),
+      IssueDescription: String(issueDescription).slice(0, MAX_TEXT_LENGTH),
+      ReproductionSteps: String(reproductionSteps ?? '').slice(0, MAX_TEXT_LENGTH),
+    };
+
+    // Single-line JSON body so the flow can Parse JSON it directly.
+    const resendRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${resendKey}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        Email: user.email,
-        DateSubmitted: dateSubmitted || new Date().toISOString(),
-        FeedbackType: String(feedbackType).slice(0, 200),
-        ScreenName: String(screenName).slice(0, 200),
-        Severity: String(severity).slice(0, 200),
-        IssueDescription: String(issueDescription).slice(0, MAX_TEXT_LENGTH),
-        ReproductionSteps: String(reproductionSteps ?? '').slice(0, MAX_TEXT_LENGTH),
+        from: fromAddress,
+        to: [toAddress],
+        subject: `[COA-FEEDBACK] ${item.FeedbackType} - ${item.ScreenName}`,
+        text: JSON.stringify(item),
       }),
     });
 
-    if (!flowRes.ok) {
-      const errText = await flowRes.text();
-      return new Response(JSON.stringify({ error: 'Power Automate error: ' + errText }), { status: 502, headers: corsHeaders });
+    if (!resendRes.ok) {
+      const errText = await resendRes.text();
+      return new Response(JSON.stringify({ error: 'Resend error: ' + errText }), { status: 502, headers: corsHeaders });
     }
 
     return new Response(JSON.stringify({ ok: true }), {

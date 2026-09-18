@@ -111,8 +111,10 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;}
 
 /* ---------- Feedback widget ---------- */
-.feedback-fab{position:fixed;right:20px;bottom:20px;z-index:90;background:var(--header);color:var(--text);border:1px solid var(--border);border-radius:999px;padding:10px 18px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.35);transition:all 0.15s;}
-.feedback-fab:hover{background:var(--teal);color:var(--void);border-color:var(--teal);}
+.feedback-fab{position:fixed;right:20px;bottom:20px;z-index:90;background:#12305F;color:#FFFFFF;border:1px solid rgba(255,255,255,0.25);border-radius:999px;padding:10px 18px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.35);transition:all 0.15s;}
+.feedback-fab:hover{background:#1E4A8F;color:#FFFFFF;border-color:rgba(255,255,255,0.5);}
+.feedback-modal .modal-actions .btn-logout{background:var(--raised);border:1px solid var(--border);color:var(--text);}
+.feedback-modal .modal-actions .btn-logout:hover{border-color:var(--red);color:var(--red);}
 .feedback-modal .modal-box{max-width:460px;text-align:left;}
 .feedback-modal textarea.field-input{resize:vertical;min-height:70px;font-family:'DM Sans',sans-serif;}
 .feedback-success{font-size:13px;color:var(--teal);text-align:center;padding:20px 0;}

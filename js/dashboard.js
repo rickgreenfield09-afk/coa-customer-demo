@@ -612,13 +612,17 @@ function renderChart(slinIds, asOfDate, metrics, forecast, startDate){
     if(idx !== -1){ exhaustionX = xFor(idx); }
   }
 
-  var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%;height:75px;" preserveAspectRatio="none">'
-    + '<line x1="' + pad + '" y1="' + fundedY.toFixed(1) + '" x2="' + (w - pad) + '" y2="' + fundedY.toFixed(1) + '" stroke="var(--cfd-green)" stroke-width="2" stroke-dasharray="6,4"></line>'
-    + '<path d="' + actualPath + '" fill="none" stroke="var(--cfd-blue)" stroke-width="2.5"></path>'
-    + (eacPath ? '<path d="' + eacPath + '" fill="none" stroke="var(--muted)" stroke-width="2" stroke-dasharray="4,4"></path>' : '')
-    + (exhaustionX !== null ? '<line x1="' + exhaustionX.toFixed(1) + '" y1="' + pad + '" x2="' + exhaustionX.toFixed(1) + '" y2="' + (h - pad) + '" stroke="var(--cfd-red)" stroke-width="2" stroke-dasharray="3,3"></line>' : '')
-    + actualCoords.map(function(c){ return '<circle cx="' + c.x.toFixed(1) + '" cy="' + c.y.toFixed(1) + '" r="2.5" fill="var(--cfd-blue)"></circle>'; }).join('')
-    + '<line x1="' + pad + '" y1="' + (h - pad) + '" x2="' + (w - pad) + '" y2="' + (h - pad) + '" stroke="var(--border)" stroke-width="1"></line>'
+  // The SVG stretches to fill its panel (preserveAspectRatio="none"), so
+  // strokes use non-scaling-stroke to keep their weight, and data points
+  // are zero-length round-capped paths rather than circles so they stay
+  // round instead of stretching into ellipses.
+  var svg = '<svg class="cfd-chart-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+    + '<line x1="' + pad + '" y1="' + fundedY.toFixed(1) + '" x2="' + (w - pad) + '" y2="' + fundedY.toFixed(1) + '" stroke="var(--cfd-green)" stroke-width="2" stroke-dasharray="6,4" vector-effect="non-scaling-stroke"></line>'
+    + '<path d="' + actualPath + '" fill="none" stroke="var(--cfd-blue)" stroke-width="2.5" vector-effect="non-scaling-stroke"></path>'
+    + (eacPath ? '<path d="' + eacPath + '" fill="none" stroke="var(--muted)" stroke-width="2" stroke-dasharray="4,4" vector-effect="non-scaling-stroke"></path>' : '')
+    + (exhaustionX !== null ? '<line x1="' + exhaustionX.toFixed(1) + '" y1="' + pad + '" x2="' + exhaustionX.toFixed(1) + '" y2="' + (h - pad) + '" stroke="var(--cfd-red)" stroke-width="2" stroke-dasharray="3,3" vector-effect="non-scaling-stroke"></line>' : '')
+    + actualCoords.map(function(c){ return '<path d="M' + c.x.toFixed(1) + ',' + c.y.toFixed(1) + ' l0,0" stroke="var(--cfd-blue)" stroke-width="5" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'; }).join('')
+    + '<line x1="' + pad + '" y1="' + (h - pad) + '" x2="' + (w - pad) + '" y2="' + (h - pad) + '" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"></line>'
     + '</svg>';
 
   var legend = '<div class="cfd-odc-legend" style="justify-content:flex-start;margin-top:6px;">'

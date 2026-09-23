@@ -299,7 +299,7 @@ main{flex:1;padding:16px 24px;overflow:hidden;display:flex;flex-direction:column
    form is shown locked, so disabled fields read as plain values rather than
    greyed-out controls; the few fields the approver fills in stay normal. */
 .travel-review .field-input:disabled,.travel-review .info-edit-input:disabled{opacity:1;color:var(--text);background:var(--raised);cursor:default;-webkit-text-fill-color:var(--text);}
-.travel-review .te-eww-input{border-color:var(--teal);}
+.travel-review .te-eww-input:not(:disabled){border-color:var(--teal);}
 .tk-pto-stat-box{background:var(--raised);border-radius:6px;padding:16px;}
 .tk-pto-stat-label{font-size:10px;font-family:'DM Mono',monospace;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;}
 .tk-pto-stat-val{font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--teal);}

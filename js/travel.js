@@ -275,8 +275,15 @@ async function teFetchEmployeeRoster(){
 async function teLoadTravelers(fallbackEmployeeId){
   fallbackEmployeeId = fallbackEmployeeId || travel.employeeId;
   teTravelers = [];
+  // The roster only feeds the Traveler 2-4 pickers — a failure there (e.g.
+  // a role that can't list employees) mustn't stop the saved travelers from
+  // loading.
   try{
     await teFetchEmployeeRoster();
+  }catch(e){
+    console.error(e);
+  }
+  try{
     if(teEditingId){
       var { data: rows } = await supabaseClient.from('travel_estimate_travelers').select('*, demo_employees(full_name)').eq('estimate_id', teEditingId).order('traveler_number');
       if(rows && rows.length){
@@ -314,9 +321,14 @@ function teRenderTravelerRows(){
       // <select> used for slots 2-4 and every row lines up.
       nameHtml = '<div><label class="field-label">Traveler 1 (' + (reviewing ? 'Submitter' : 'You') + ')</label><input class="field-input" value="' + escAttr(t.employeeName || '') + '" disabled></div>';
     }else{
-      var options = '<option value="">— Select employee —</option>' + roster.filter(function(e){
+      var choices = roster.filter(function(e){
         return e.id === t.employeeId || chosenIds.indexOf(e.id) === -1;
-      }).map(function(e){
+      });
+      // Keep a saved traveler selectable even if the roster couldn't load.
+      if(t.employeeId && !choices.some(function(e){ return e.id === t.employeeId; })){
+        choices.unshift({ id: t.employeeId, full_name: t.employeeName || '—' });
+      }
+      var options = '<option value="">— Select employee —</option>' + choices.map(function(e){
         return '<option value="' + e.id + '"' + (e.id === t.employeeId ? ' selected' : '') + '>' + escAttr(e.full_name) + '</option>';
       }).join('');
       nameHtml = '<div><label class="field-label">Traveler ' + t.slot + '</label><select class="field-input" onchange="teSelectTravelerEmployee(' + t.slot + ', this.value)">' + options + '</select></div>';
@@ -424,7 +436,20 @@ function teFormHtml(row, rejectionNote, review){
   // request don't see the markup, only their actual costs. EWW is entered
   // by the Supervisor at review, so its totals only show there too.
   var showBillable = review || currentPersonaSlug() === 'supervisor';
-  var totalsHtml = review
+  // Prime authorization (review.prime): every ODC amount on the form is
+  // already marked up (see openAuthorizationReview), so these totals ARE
+  // the billable figures — no separate internal vs. billable rows, and no
+  // internal-only lodging breakdown (room cost, fees, taxes).
+  var prime = !!(review && review.prime);
+  var hiddenForPrime = prime ? ' style="display:none;"' : '';
+  var totalsHtml = prime
+    ? '<div class="tk-pto-summary-row">'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="te-total-per-traveler">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val" id="te-total-trip-lead">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val" id="te-total-eww">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total</div><div class="tk-pto-stat-val" id="te-total-grand">$0.00</div></div>'
+      + '</div>'
+    : review
     ? '<div class="tk-pto-summary-row">'
       + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="te-total-per-traveler">$0.00</div></div>'
       + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val" id="te-total-trip-lead">$0.00</div></div>'
@@ -483,10 +508,10 @@ function teFormHtml(row, rejectionNote, review){
     + '</div>'
     + '<div class="login-error" id="te-gsa-lookup-error" style="text-align:left;margin-top:-4px;"></div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
-    + '<div><label class="field-label" for="te-room-cost">Room Cost (subject to per diem limit)</label>' + currencyInputHtml('te-room-cost', 0, 'teRecalc') + '</div>'
+    + '<div' + hiddenForPrime + '><label class="field-label" for="te-room-cost">Room Cost (subject to per diem limit)</label>' + currencyInputHtml('te-room-cost', 0, 'teRecalc') + '</div>'
     + '<div><label class="field-label" for="te-lodging-cost">Total Lodging Cost (incl. taxes &amp; fees)</label>' + currencyInputHtml('te-lodging-cost', 0, 'teRecalc') + '</div>'
     + '</div>'
-    + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
+    + '<div class="tk-pto-form-grid"' + (prime ? ' style="display:none;"' : ' style="grid-template-columns:1fr 1fr;"') + '>'
     + '<div><label class="field-label" for="te-lodging-fees">Lodging Fees</label>' + currencyInputHtml('te-lodging-fees', 0, 'teRecalc') + '</div>'
     + '<div><label class="field-label" for="te-lodging-taxes">Lodging Taxes</label>' + currencyInputHtml('te-lodging-taxes', 0, 'teRecalc') + '</div>'
     + '</div>'
@@ -599,7 +624,9 @@ function teCalc(inputs){
   // "To Prime" billable totals: every ODC line except per-diem meals and EWW
   // is marked up by the fee multiplier — the one stamped on the estimate at
   // submit time when a Supervisor is reviewing it, else the current setting.
-  var multiplier = teReview ? teReview.multiplier : travel.feeMultiplier;
+  // In the Prime's view the inputs are already marked up, so nothing is
+  // multiplied again.
+  var multiplier = teReview ? (teReview.prime ? 1 : teReview.multiplier) : travel.feeMultiplier;
   var billableMarkupBucket = (perTravelerMarkupBucket * inputs.trainers + tripLevelBucket) * multiplier;
   var billableTripLead = (perDiemMealsTotal * inputs.trainers) + billableMarkupBucket;
   var billableGrandTotal = billableTripLead + ewwTotal;
@@ -671,7 +698,9 @@ function teRecalc(){
 
   var warningEl = document.getElementById('te-lodging-warning');
   if(warningEl){
-    if(teLodgingOverRate(inputs, calc.nights)){
+    // GSA-limit compliance (and its comparison quotes) is internal — the
+    // Supervisor already cleared it before the Prime sees the estimate.
+    if(!(teReview && teReview.prime) && teLodgingOverRate(inputs, calc.nights)){
       warningEl.style.display = '';
       document.getElementById('te-lodging-warning-text').textContent =
         'Average room cost ($' + teLodgingAvgPerNight(inputs, calc.nights).toFixed(2) + '/night, from a $' + inputs.roomCost.toFixed(2) + ' room cost over ' + calc.nights + ' nights — taxes & fees don\'t count against the limit) exceeds the GSA rate ($' + inputs.lodgingRate.toFixed(2) + '/night) — '
@@ -1443,6 +1472,8 @@ async function estimateApprovalAction(estimateId, decision){
 async function loadAuthorizationsQueue(){
   var content = document.getElementById('travel-content');
   content.innerHTML = '<div class="tk-empty">Loading...</div>';
+  teReview = null;
+  teFormDirty = false;
   try{
     var { data: rows } = await supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,eww_total,billable_grand_total,tracking_number,created_by,slin_id').eq('status', 'supervisor_approved').order('created_at');
     rows = rows || [];
@@ -1472,34 +1503,67 @@ async function loadAuthorizationsQueue(){
 async function openAuthorizationReview(estimateId){
   var detail = document.getElementById('travel-authorization-detail');
   detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
-  var { data: rows } = await supabaseClient.from('travel_estimates').select('*').eq('id', estimateId).limit(1);
-  if(!rows || !rows.length){ detail.innerHTML = ''; return; }
-  var r = rows[0];
-  var names = await employeeNamesById([r.created_by]);
-  var slin = travel.odcSlins.find(function(s){ return s.slin_id === r.slin_id; });
-  // The Prime only ever sees the marked-up total, never the internal
-  // (non-billable) trip lead figure.
-  var grand = parseFloat(r.billable_grand_total) || 0;
+  var data = await teFetchEstimateDetailData(estimateId);
+  if(!data){ detail.innerHTML = ''; return; }
+  var r = data.r, names = data.names, slin = data.slin, multiplier = data.multiplier;
 
-  detail.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Authorize Travel — ' + escAttr(names[r.created_by] || '—') + '</div>'
-    + '<div class="placeholder-sub" style="margin-bottom:14px;">Already approved internally by the Supervisor. Your authorization is required before this trip can proceed and be expensed.</div>'
+  // Same form the employee submitted and the Supervisor reviewed, read-only
+  // — but the Prime only ever sees marked-up figures, never the internal
+  // requested amounts (same rule as the Prime's email copy), so every
+  // marked-up ODC field is prefilled at its billable value below.
+  teReview = { id: r.id, row: r, multiplier: multiplier, prime: true };
+  teEditingId = r.id;
+  await teLoadTravelers(r.created_by);
+  teEditingId = null;
+  teLodgingQuotes = [];
+
+  var headerHtml = '<div class="resume-section"><div class="resume-section-title">Authorization Details</div>'
     + '<div class="profile-grid">'
-    + travelReadOnlyField('Destination', r.destination_event)
-    + travelReadOnlyField('Event Name', r.event_name)
-    + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
+    + travelReadOnlyField('Submitted By', names[r.created_by] || '—')
     + travelReadOnlyField('Tracking Number', r.tracking_number || '—')
     + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : '—')
-    + travelReadOnlyField('Grand Total', '$' + grand.toFixed(2))
+    + travelReadOnlyField('Supervisor Approved', r.approved_at ? formatDate(r.approved_at.slice(0, 10)) : '—')
     + '</div>'
-    + '<div id="travel-auth-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-auth-note" rows="2"></textarea></div>'
+    + '<div class="placeholder-sub" style="margin-top:8px;">Already approved internally by the Supervisor. Your authorization is required before this trip can proceed and be expensed. All amounts shown are the totals billed to you.</div>'
+    + '</div>';
+
+  var footerHtml = '<div id="travel-auth-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-auth-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-auth-error"></div>'
     + '<div class="profile-actions">'
     + '<button class="btn-save" onclick="authorizationAction(\'' + r.id + '\',\'approved\')">Authorize Travel</button>'
     + '<button class="btn-edit" onclick="authorizationAction(\'' + r.id + '\',\'returned\')">Return</button>'
     + '<button class="btn-cancel" style="color:var(--red);border-color:var(--red);" onclick="authorizationAction(\'' + r.id + '\',\'denied\')">Deny</button>'
-    + '<button class="btn-cancel" onclick="document.getElementById(\'travel-authorization-detail\').innerHTML=\'\'">Close</button>'
-    + '</div></div>';
+    + '<button class="btn-cancel" onclick="teCloseAuthorizationReview()">Close</button>'
+    + '</div>';
+
+  detail.innerHTML = teFormHtml(r, null, {
+    title: 'Authorize Travel — ' + escAttr(names[r.created_by] || '—'),
+    headerHtml: headerHtml,
+    footerHtml: footerHtml,
+    prime: true
+  });
+  tePrefillForm(r);
+  // Marked-up lines per buildTravelEstimateEmailHtml's primeView: lodging
+  // total, flight, transportation, shipping. Per-diem rates and EWW are
+  // never marked up.
+  var markedUpFields = {
+    'te-lodging-cost': r.lodging_cost_total, 'te-airfare': r.airfare_avg, 'te-baggage': r.baggage,
+    'te-parking-transport': r.airport_parking_transport, 'te-rental-car': r.rental_car, 'te-fuel-gas': r.fuel_gas,
+    'te-parking': r.parking, 'te-tolls': r.tolls, 'te-rideshare': r.rideshare_estimate, 'te-mileage': r.mileage,
+    'te-shipping-to': r.shipping_to, 'te-shipping-back': r.shipping_back
+  };
+  Object.keys(markedUpFields).forEach(function(id){
+    document.getElementById(id).value = '$' + ((parseFloat(markedUpFields[id]) || 0) * multiplier).toFixed(2);
+  });
+  document.querySelectorAll('#te-form-fields input, #te-form-fields select, #te-form-fields textarea').forEach(function(el){ el.disabled = true; });
+  teRecalc();
+  teFormDirty = false;
+}
+
+function teCloseAuthorizationReview(){
+  teReview = null;
+  teFormDirty = false;
+  document.getElementById('travel-authorization-detail').innerHTML = '';
 }
 
 async function authorizationAction(estimateId, decision){
@@ -1531,7 +1595,7 @@ async function authorizationAction(estimateId, decision){
       notifySelf('Travel authorization ' + decision, '<p>You ' + decision + ' a travel authorization' + (authNote ? ': ' + escAttr(authNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
     }
 
-    document.getElementById('travel-authorization-detail').innerHTML = '';
+    teCloseAuthorizationReview();
     loadAuthorizationsQueue();
   }catch(e){
     errorEl.textContent = 'Couldn\'t save decision. Try again.';

@@ -179,9 +179,16 @@ var teLodgingQuotes = [];
 // Up to 4 travelers per estimate (travel_estimate_travelers), each linked to
 // a real demo_employees record with its own EWW rate/hours. Slot 1 is always
 // the submitter (travel.employeeId) and can't be removed; slots 2-4 are
-// added/removed as the Trainers count changes.
+// added/removed as the Travelers count changes.
 var teTravelers = [];
 var teEmployeeRoster = null;
+
+// Set while a Supervisor is reviewing a submitted estimate (see
+// openEstimateApproval): the same form the employee filled out is rendered
+// read-only, except the per-traveler EWW fields, which are hidden from the
+// submitter and entered here by the approver instead. Null on the employee's
+// own New/Edit form.
+var teReview = null;
 
 // Set true by any edit to the open New/Edit Travel Estimate form (delegated
 // listener below, scoped to #te-estimate-form), cleared on a fresh form load
@@ -208,6 +215,7 @@ async function loadMyEstimates(editId){
   var content = document.getElementById('travel-content');
   teEditingId = editId || null;
   teEditingRow = null;
+  teReview = null;
   teFormDirty = false;
 
   if(!travel.employeeId){
@@ -264,7 +272,8 @@ async function teFetchEmployeeRoster(){
   return teEmployeeRoster;
 }
 
-async function teLoadTravelers(){
+async function teLoadTravelers(fallbackEmployeeId){
+  fallbackEmployeeId = fallbackEmployeeId || travel.employeeId;
   teTravelers = [];
   try{
     await teFetchEmployeeRoster();
@@ -284,21 +293,26 @@ async function teLoadTravelers(){
     console.error(e);
   }
   if(!teTravelers.length){
-    var names = await employeeNamesById([travel.employeeId]);
-    teTravelers = [{ slot: 1, employeeId: travel.employeeId, employeeName: names[travel.employeeId] || null, ewwRate: 0, ewwHours: 0 }];
+    var names = await employeeNamesById([fallbackEmployeeId]);
+    teTravelers = [{ slot: 1, employeeId: fallbackEmployeeId, employeeName: names[fallbackEmployeeId] || null, ewwRate: 0, ewwHours: 0 }];
   }
 }
 
+// EWW fields only render in Supervisor review (teReview) — the submitter
+// just picks who's traveling. Any EWW values already saved on the estimate
+// (e.g. entered by a Supervisor before returning it) stay in teTravelers
+// and are re-saved untouched when the employee resubmits.
 function teRenderTravelerRows(){
   var roster = teEmployeeRoster || [];
   var chosenIds = teTravelers.map(function(t){ return t.employeeId; }).filter(Boolean);
+  var reviewing = !!teReview;
   return teTravelers.map(function(t){
     var nameHtml;
     if(t.slot === 1){
       // Read-only, but rendered as a disabled field-input (not
       // travelReadOnlyField's info-box) so its height/padding matches the
       // <select> used for slots 2-4 and every row lines up.
-      nameHtml = '<div><label class="field-label">Traveler 1 (You)</label><input class="field-input" value="' + escAttr(t.employeeName || '') + '" disabled></div>';
+      nameHtml = '<div><label class="field-label">Traveler 1 (' + (reviewing ? 'Submitter' : 'You') + ')</label><input class="field-input" value="' + escAttr(t.employeeName || '') + '" disabled></div>';
     }else{
       var options = '<option value="">— Select employee —</option>' + roster.filter(function(e){
         return e.id === t.employeeId || chosenIds.indexOf(e.id) === -1;
@@ -307,14 +321,19 @@ function teRenderTravelerRows(){
       }).join('');
       nameHtml = '<div><label class="field-label">Traveler ' + t.slot + '</label><select class="field-input" onchange="teSelectTravelerEmployee(' + t.slot + ', this.value)">' + options + '</select></div>';
     }
+    if(!reviewing){
+      var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" style="font-size:40px;line-height:1;font-weight:700;" title="Remove traveler" onclick="teRemoveTraveler(' + t.slot + ')">&times;</button>';
+      return '<div class="tk-pto-form-grid" style="grid-template-columns:minmax(0,420px) 32px;align-items:end;">'
+        + nameHtml
+        + '<div style="align-self:stretch;display:flex;align-items:center;justify-content:center;">' + removeBtn + '</div>'
+        + '</div>';
+    }
     var ewwCost = (parseFloat(t.ewwRate) || 0) * (parseFloat(t.ewwHours) || 0);
-    var removeBtn = t.slot === 1 ? '' : '<button type="button" class="btn-remove-row" style="font-size:40px;line-height:1;font-weight:700;" title="Remove traveler" onclick="teRemoveTraveler(' + t.slot + ')">&times;</button>';
-    return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr 1fr 32px;align-items:end;">'
+    return '<div class="tk-pto-form-grid" style="grid-template-columns:1.4fr 1fr 1fr 1fr;align-items:end;">'
       + nameHtml
-      + '<div><label class="field-label">EWW Rate (per hour)</label><input type="text" inputmode="decimal" class="field-input" id="te-traveler-eww-rate-' + t.slot + '" value="$' + (parseFloat(t.ewwRate) || 0).toFixed(2) + '" onfocus="currencyFocus(this)" onblur="teTravelerEwwRateBlur(this,' + t.slot + ')"></div>'
-      + '<div><label class="field-label">EWW Hours</label><input type="number" step="0.01" class="field-input" value="' + t.ewwHours + '" onchange="teUpdateTravelerEww(' + t.slot + ',\'ewwHours\',this.value)"></div>'
-      + '<div class="info-box"><div class="info-label">EWW Cost</div><div class="info-val">$' + ewwCost.toFixed(2) + '</div></div>'
-      + '<div style="align-self:stretch;display:flex;align-items:center;justify-content:center;">' + removeBtn + '</div>'
+      + '<div><label class="field-label">EWW Rate (per hour)</label><input type="text" inputmode="decimal" class="field-input te-eww-input" id="te-traveler-eww-rate-' + t.slot + '" value="$' + (parseFloat(t.ewwRate) || 0).toFixed(2) + '" onfocus="currencyFocus(this)" onblur="teTravelerEwwRateBlur(this,' + t.slot + ')"></div>'
+      + '<div><label class="field-label">EWW Hours</label><input type="number" step="0.01" class="field-input te-eww-input" value="' + t.ewwHours + '" oninput="teUpdateTravelerEww(' + t.slot + ',\'ewwHours\',this.value)"></div>'
+      + '<div class="info-box"><div class="info-label">EWW Cost</div><div class="info-val" id="te-traveler-eww-cost-' + t.slot + '">$' + ewwCost.toFixed(2) + '</div></div>'
       + '</div>';
   }).join('');
 }
@@ -374,7 +393,7 @@ function teTravelerEwwRateBlur(el, slot){
 
 // Persists the current teTravelers array for an estimate: delete-then-insert
 // avoids tracking which slots changed. Slots with no employee chosen yet
-// (blank slots added by bumping Trainers, not yet assigned) are skipped —
+// (blank slots added by bumping Travelers, not yet assigned) are skipped —
 // employee_id is NOT NULL on travel_estimate_travelers, and blank slots are
 // only allowed to exist transiently on an unsubmitted draft.
 async function teSaveTravelers(estimateId){
@@ -388,8 +407,11 @@ async function teSaveTravelers(estimateId){
   if(insErr){ throw insErr; }
 }
 
-function teFormHtml(row, rejectionNote){
-  var formTitle = row ? ((row.status === 'returned' || row.status === 'denied') ? 'Edit & Resubmit Travel Estimate' : 'Edit Draft Travel Estimate') : 'New Travel Estimate';
+// review (Supervisor approval only): { title, headerHtml, footerHtml } —
+// renders this same form read-only (see teReview) with approver-only
+// sections above and below it instead of the submitter's Submit/Save/Cancel.
+function teFormHtml(row, rejectionNote, review){
+  var formTitle = review ? review.title : row ? ((row.status === 'returned' || row.status === 'denied') ? 'Edit & Resubmit Travel Estimate' : 'Edit Draft Travel Estimate') : 'New Travel Estimate';
   var rejectionBannerHtml = '';
   if(row && (row.status === 'returned' || row.status === 'denied') && rejectionNote){
     rejectionBannerHtml = '<div class="warning-box">'
@@ -397,9 +419,40 @@ function teFormHtml(row, rejectionNote){
       + '<div class="warning-box-text">' + escAttr(rejectionNote) + '</div></div>'
       + '</div>';
   }
-  return '<div class="tk-entry-card" id="te-estimate-form">'
+  // Fee-multiplier/Prime-billable figures are Supervisor-facing (the
+  // internal approval/pricing view) — Employees filling out their own
+  // request don't see the markup, only their actual costs. EWW is entered
+  // by the Supervisor at review, so its totals only show there too.
+  var showBillable = review || currentPersonaSlug() === 'supervisor';
+  var totalsHtml = review
+    ? '<div class="tk-pto-summary-row">'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="te-total-per-traveler">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val" id="te-total-trip-lead">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val" id="te-total-eww">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total (ODC + EWW)</div><div class="tk-pto-stat-val" id="te-total-grand">$0.00</div></div>'
+      + '</div>'
+      + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val" id="te-total-billable-trip-lead">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val" id="te-total-billable-grand">$0.00</div></div>'
+      + '</div>'
+    : '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(' + (showBillable ? 3 : 2) + ',1fr);">'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="te-total-per-traveler">$0.00</div></div>'
+      + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val" id="te-total-trip-lead">$0.00</div></div>'
+      + (showBillable ? '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val" id="te-total-billable-trip-lead">$0.00</div></div>' : '')
+      + '</div>';
+  var actionsHtml = review
+    ? review.footerHtml
+    : '<div class="profile-actions">'
+      + '<button class="btn-save" onclick="submitTravelEstimate(\'submitted\')">Submit Estimate</button>'
+      + '<button class="btn-cancel" onclick="submitTravelEstimate(\'draft\')">Save as Draft</button>'
+      + '<button class="btn-cancel" onclick="loadMyEstimates()">Cancel</button>'
+      + '</div>'
+      + '<div class="login-error" id="te-form-error"></div>';
+  return '<div class="tk-entry-card' + (review ? ' travel-review' : '') + '" id="te-estimate-form">'
     + '<div class="tk-section-title">' + formTitle + '</div>'
     + rejectionBannerHtml
+    + (review ? review.headerHtml : '')
+    + '<div id="te-form-fields">'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 90px 343px;">'
     + '<div><label class="field-label" for="te-event-name">Event Name</label><input class="field-input" id="te-event-name" placeholder="Event name"></div>'
     + '<div><label class="field-label" for="te-city">City</label><input class="field-input" id="te-city" placeholder="City" onchange="teMaybeAutoLookupGsa()"></div>'
@@ -411,7 +464,7 @@ function teFormHtml(row, rejectionNote){
     + '<div class="tk-pto-form-grid" style="grid-template-columns:140px 140px 100px;">'
     + '<div><label class="field-label" for="te-leave-date">Leave Date</label><input type="date" class="field-input" id="te-leave-date" oninput="teRecalc();teMaybeAutoLookupGsa();"></div>'
     + '<div><label class="field-label" for="te-return-date">Return Date</label><input type="date" class="field-input" id="te-return-date" oninput="teRecalc()"></div>'
-    + '<div><label class="field-label" for="te-trainers">Trainers</label><select class="field-input" id="te-trainers" onchange="teSetTrainerCount(this.value);teRecalc();">'
+    + '<div><label class="field-label" for="te-trainers">Travelers</label><select class="field-input" id="te-trainers" onchange="teSetTrainerCount(this.value);teRecalc();">'
     + [1, 2, 3, 4].map(function(n){ return '<option value="' + n + '"' + (n === teTravelers.length ? ' selected' : '') + '>' + n + '</option>'; }).join('')
     + '</select></div>'
     + '</div>'
@@ -423,7 +476,7 @@ function teFormHtml(row, rejectionNote){
     + '<div><label class="field-label" for="te-meals-rate">Meals (M&amp;IE) Rate (per day)</label>' + currencyInputHtml('te-meals-rate', 0, 'teRecalc') + '</div>'
     + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:auto 1fr 1fr 1fr;gap:16px;margin:4px 0 8px;align-items:end;">'
-    + '<div><button type="button" class="btn-cancel" id="te-gsa-lookup-btn" onclick="teMaybeAutoLookupGsa()">Refresh GSA Rates</button></div>'
+    + '<div>' + (review ? '' : '<button type="button" class="btn-cancel" id="te-gsa-lookup-btn" onclick="teMaybeAutoLookupGsa()">Refresh GSA Rates</button>') + '</div>'
     + '<div class="info-box"><div class="info-label">Nights</div><div class="info-val" id="te-calc-nights">0</div></div>'
     + '<div class="info-box"><div class="info-label">Full Days (1x)</div><div class="info-val" id="te-calc-fulldays">0</div></div>'
     + '<div class="info-box"><div class="info-label">Per Diem Meals Total</div><div class="info-val" id="te-calc-perdiem">$0.00</div></div>'
@@ -439,7 +492,10 @@ function teFormHtml(row, rejectionNote){
     + '</div>'
     + '<div class="warning-box" id="te-lodging-warning" style="display:none;">'
     + '<div><div class="warning-box-title">Lodging cost exceeds GSA rate</div><div class="warning-box-text" id="te-lodging-warning-text"></div>'
-    + '<button type="button" class="btn-edit" style="margin-top:8px;" id="te-lodging-quotes-btn" onclick="teOpenLodgingQuotesModal()">Upload Comparison Quotes</button></div>'
+    + (review
+      ? '<div id="te-review-quotes" style="margin-top:8px;">' + teReviewLodgingQuotesHtml() + '</div>'
+      : '<button type="button" class="btn-edit" style="margin-top:8px;" id="te-lodging-quotes-btn" onclick="teOpenLodgingQuotesModal()">Upload Comparison Quotes</button>')
+    + '</div>'
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Flight</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
@@ -468,29 +524,23 @@ function teFormHtml(row, rejectionNote){
     + '</div></div>'
     + '</div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
-    + '<div class="tk-pto-summary-row">'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Per Traveler Subtotal</div><div class="tk-pto-stat-val" id="te-total-per-traveler">$0.00</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val" id="te-total-trip-lead">$0.00</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val" id="te-total-eww">$0.00</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total (ODC + EWW)</div><div class="tk-pto-stat-val" id="te-total-grand">$0.00</div></div>'
+    + totalsHtml
     + '</div>'
-    // Fee-multiplier/Prime-billable figures are Supervisor-facing (the
-    // internal approval/pricing view) — Employees filling out their own
-    // request don't see the markup, only their actual costs.
-    + (currentPersonaSlug() === 'supervisor'
-      ? '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
-        + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val" id="te-total-billable-trip-lead">$0.00</div></div>'
-        + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val" id="te-total-billable-grand">$0.00</div></div>'
-        + '</div>'
-      : '')
     + '</div>'
-    + '<div class="profile-actions">'
-    + '<button class="btn-save" onclick="submitTravelEstimate(\'submitted\')">Submit Estimate</button>'
-    + '<button class="btn-cancel" onclick="submitTravelEstimate(\'draft\')">Save as Draft</button>'
-    + '<button class="btn-cancel" onclick="loadMyEstimates()">Cancel</button>'
-    + '</div>'
-    + '<div class="login-error" id="te-form-error"></div>'
+    + actionsHtml
     + '</div>';
+}
+
+// Read-only view of the lodging comparison quotes for the Supervisor review
+// (the submitter's upload modal lives behind teOpenLodgingQuotesModal).
+function teReviewLodgingQuotesHtml(){
+  if(!teLodgingQuotes.length){ return '<div class="warning-box-text">No comparison quotes attached.</div>'; }
+  var rates = teLodgingQuotes.filter(function(q){ return q.average_daily_rate != null; }).map(function(q){ return parseFloat(q.average_daily_rate); });
+  return teLodgingQuotes.map(function(q){
+    return '<div class="resume-cart-item"><a href="' + escAttr(q.file_url) + '" target="_blank">' + escAttr(q.file_name || 'Quote') + '</a>'
+      + '<span>' + (q.average_daily_rate == null ? 'No rate entered' : '$' + parseFloat(q.average_daily_rate).toFixed(2) + '/night') + '</span></div>';
+  }).join('')
+    + (rates.length ? '<div class="placeholder-sub" style="margin-top:6px;">Average of quoted rates: $' + (rates.reduce(function(a, b){ return a + b; }, 0) / rates.length).toFixed(2) + '/night</div>' : '');
 }
 
 function tePrefillForm(row){
@@ -547,8 +597,10 @@ function teCalc(inputs){
   var ewwTotal = teTravelers.reduce(function(sum, t){ return sum + (t.ewwRate * t.ewwHours); }, 0);
 
   // "To Prime" billable totals: every ODC line except per-diem meals and EWW
-  // is marked up by travel.feeMultiplier.
-  var billableMarkupBucket = (perTravelerMarkupBucket * inputs.trainers + tripLevelBucket) * travel.feeMultiplier;
+  // is marked up by the fee multiplier — the one stamped on the estimate at
+  // submit time when a Supervisor is reviewing it, else the current setting.
+  var multiplier = teReview ? teReview.multiplier : travel.feeMultiplier;
+  var billableMarkupBucket = (perTravelerMarkupBucket * inputs.trainers + tripLevelBucket) * multiplier;
   var billableTripLead = (perDiemMealsTotal * inputs.trainers) + billableMarkupBucket;
   var billableGrandTotal = billableTripLead + ewwTotal;
 
@@ -603,8 +655,15 @@ function teRecalc(){
   document.getElementById('te-calc-perdiem').textContent = '$' + calc.perDiemMealsTotal.toFixed(2);
   document.getElementById('te-total-per-traveler').textContent = '$' + calc.perTravelerInternal.toFixed(2);
   document.getElementById('te-total-trip-lead').textContent = '$' + calc.tripLeadInternal.toFixed(2);
-  document.getElementById('te-total-eww').textContent = '$' + calc.ewwTotal.toFixed(2);
-  document.getElementById('te-total-grand').textContent = '$' + (calc.tripLeadInternal + calc.ewwTotal).toFixed(2);
+  // EWW totals/per-traveler cost boxes only exist in Supervisor review.
+  var ewwEl = document.getElementById('te-total-eww');
+  if(ewwEl){ ewwEl.textContent = '$' + calc.ewwTotal.toFixed(2); }
+  var grandEl = document.getElementById('te-total-grand');
+  if(grandEl){ grandEl.textContent = '$' + (calc.tripLeadInternal + calc.ewwTotal).toFixed(2); }
+  teTravelers.forEach(function(t){
+    var costEl = document.getElementById('te-traveler-eww-cost-' + t.slot);
+    if(costEl){ costEl.textContent = '$' + ((parseFloat(t.ewwRate) || 0) * (parseFloat(t.ewwHours) || 0)).toFixed(2); }
+  });
   var billableTripLeadEl = document.getElementById('te-total-billable-trip-lead');
   if(billableTripLeadEl){ billableTripLeadEl.textContent = '$' + calc.billableTripLead.toFixed(2); }
   var billableGrandEl = document.getElementById('te-total-billable-grand');
@@ -615,8 +674,10 @@ function teRecalc(){
     if(teLodgingOverRate(inputs, calc.nights)){
       warningEl.style.display = '';
       document.getElementById('te-lodging-warning-text').textContent =
-        'Average room cost ($' + teLodgingAvgPerNight(inputs, calc.nights).toFixed(2) + '/night, from a $' + inputs.roomCost.toFixed(2) + ' room cost over ' + calc.nights + ' nights — taxes & fees don\'t count against the limit) exceeds the GSA rate ($' + inputs.lodgingRate.toFixed(2) + '/night) — 3 comparison quotes are required to submit.';
-      document.getElementById('te-lodging-quotes-btn').textContent = 'Upload Comparison Quotes (' + teLodgingQuotes.length + ' of 3)';
+        'Average room cost ($' + teLodgingAvgPerNight(inputs, calc.nights).toFixed(2) + '/night, from a $' + inputs.roomCost.toFixed(2) + ' room cost over ' + calc.nights + ' nights — taxes & fees don\'t count against the limit) exceeds the GSA rate ($' + inputs.lodgingRate.toFixed(2) + '/night) — '
+        + (teReview ? teLodgingQuotes.length + ' of 3 required comparison quotes attached:' : '3 comparison quotes are required to submit.');
+      var quotesBtn = document.getElementById('te-lodging-quotes-btn');
+      if(quotesBtn){ quotesBtn.textContent = 'Upload Comparison Quotes (' + teLodgingQuotes.length + ' of 3)'; }
     }else{
       warningEl.style.display = 'none';
     }
@@ -706,7 +767,7 @@ function renderTeReadOnlyDetail(r){
     + travelReadOnlyField('SLIN', slin ? (slin.slin_code + ' — ' + slin.slin_description) : 'Not yet assigned')
     + travelReadOnlyField('Tracking Number', r.tracking_number || 'Not yet assigned')
     + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date))
-    + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
+    + travelReadOnlyField('Number of Travelers', r.number_of_trainers)
     + travelReadOnlyField('Per Traveler Subtotal', '$' + (parseFloat(r.per_traveler_subtotal) || 0).toFixed(2))
     + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.trip_lead_total) || 0).toFixed(2))
     + travelReadOnlyField('EWW Total', '$' + (parseFloat(r.eww_total) || 0).toFixed(2))
@@ -1011,6 +1072,9 @@ async function teUpdateLodgingQuoteRate(quoteId, value){
 async function loadApprovalsQueue(){
   var content = document.getElementById('travel-content');
   content.innerHTML = '<div class="tk-empty">Loading...</div>';
+  teReview = null;
+  texReview = false;
+  teFormDirty = false;
   try{
     var [{ data: pendingEst }, { data: pendingExp }] = await Promise.all([
       supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,created_by').eq('status', 'submitted').order('created_at'),
@@ -1199,40 +1263,25 @@ async function openEstimateApproval(estimateId){
   detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
   var data = await teFetchEstimateDetailData(estimateId);
   if(!data){ detail.innerHTML = ''; return; }
-  var r = data.r, names = data.names, slin = data.slin, multiplier = data.multiplier, travelerRows = data.travelerRows, nights = data.nights;
-  var grand = (parseFloat(r.trip_lead_total) || 0) + (parseFloat(r.eww_total) || 0);
-  var contract = travel.contracts.find(function(c){ return c.contract_id === r.contract_id; });
+  var r = data.r, names = data.names, multiplier = data.multiplier;
 
-  var demographicsHtml = '<div class="resume-section"><div class="resume-section-title">Demographics</div>'
+  // Same form the employee submitted, loaded the same way loadMyEstimates
+  // does for an edit — teEditingId is only borrowed here so the traveler/
+  // quote loaders read this estimate, then cleared again.
+  teReview = { id: r.id, row: r, multiplier: multiplier };
+  teEditingId = r.id;
+  await teLoadTravelers(r.created_by);
+  await teLoadLodgingQuotes();
+  teEditingId = null;
+
+  var approverDetailsHtml = '<div class="resume-section"><div class="resume-section-title">Approver Details</div>'
     + '<div class="profile-grid">'
-    + travelReadOnlyField('Destination', r.destination_event)
-    + travelReadOnlyField('Event Name', r.event_name)
-    + travelReadOnlyField('Dates', formatDate(r.leave_date) + ' – ' + formatDate(r.return_date) + ' (' + nights + ' nights)')
-    + travelReadOnlyField('Contract (submitted by employee)', contract ? teContractLabel(contract) : '—')
+    + travelReadOnlyField('Submitted By', names[r.created_by] || '—')
+    + travelReadOnlyField('Status', (r.status || '').replace('_', ' '))
     + travelReadOnlyField('Tracking Number', r.tracking_number || 'Assigned on approval')
-    + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
     + travelReadOnlyField('Fee Multiplier Used', multiplier ? multiplier.toFixed(4) + 'x' : '—')
-    + '</div></div>';
-
-  var travelersHtml = '<div class="resume-section"><div class="resume-section-title">Travelers / EWW (not marked up)</div>'
-    + '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Traveler</th><th>EWW Rate</th><th>EWW Hours</th><th>EWW Cost</th></tr></thead><tbody>'
-    + (travelerRows.length
-      ? travelerRows.map(function(t){
-          var cost = (parseFloat(t.eww_rate) || 0) * (parseFloat(t.eww_hours) || 0);
-          return '<tr><td>' + escAttr(t.demo_employees ? t.demo_employees.full_name : '—') + '</td><td>$' + (parseFloat(t.eww_rate) || 0).toFixed(2) + '</td><td>' + (parseFloat(t.eww_hours) || 0) + '</td><td>$' + cost.toFixed(2) + '</td></tr>';
-        }).join('')
-      : '<tr><td colspan="4">No traveler records found.</td></tr>')
-    + '</tbody></table></div></div>';
-
-  var lodgingHtml = teApprovalMarkupTable('Lodging', [
-    { label: 'Total Lodging Cost (incl. taxes & fees)', value: parseFloat(r.lodging_cost_total) || 0 }
-  ], multiplier)
-    + '<div class="profile-grid" style="margin-top:14px;">'
-    + travelReadOnlyField('Room Cost (subject to per diem limit)', '$' + (parseFloat(r.lodging_room_cost) || 0).toFixed(2))
-    + travelReadOnlyField('GSA Lodging Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_lodging_rate) || 0).toFixed(2))
-    + travelReadOnlyField('Meals (M&IE) Rate (reference, not marked up)', '$' + (parseFloat(r.per_diem_meals_rate) || 0).toFixed(2))
-    + travelReadOnlyField('Lodging Fees (included in total, contract-handled)', '$' + (parseFloat(r.lodging_fees) || 0).toFixed(2))
-    + travelReadOnlyField('Lodging Taxes (included in total, contract-handled)', '$' + (parseFloat(r.lodging_taxes) || 0).toFixed(2))
+    + '</div>'
+    + '<div class="placeholder-sub" style="margin-top:8px;">Below is the estimate exactly as submitted. Enter each traveler\'s EWW rate and hours — the submitter doesn\'t see or fill in EWW.</div>'
     + '</div>';
 
   var flightHtml = teApprovalMarkupTable('Flight', [
@@ -1255,16 +1304,13 @@ async function openEstimateApproval(estimateId){
     { label: 'Shipping (back)', value: parseFloat(r.shipping_back) || 0 }
   ], multiplier);
 
-  var totalsHtml = '<div class="tk-entry-card" style="margin-top:14px;">'
-    + '<div class="tk-pto-summary-row">'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Trip Lead Total</div><div class="tk-pto-stat-val">$' + (parseFloat(r.trip_lead_total) || 0).toFixed(2) + '</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">EWW Total</div><div class="tk-pto-stat-val">$' + (parseFloat(r.eww_total) || 0).toFixed(2) + '</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total</div><div class="tk-pto-stat-val">$' + grand.toFixed(2) + '</div></div>'
-    + '</div>'
-    + '<div class="tk-pto-summary-row" style="grid-template-columns:repeat(2,1fr);margin-top:16px;">'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Billable to Prime (ODC)</div><div class="tk-pto-stat-val">$' + (parseFloat(r.billable_trip_lead_total) || 0).toFixed(2) + '</div></div>'
-    + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Grand Total to Prime</div><div class="tk-pto-stat-val">$' + (parseFloat(r.billable_grand_total) || 0).toFixed(2) + '</div></div>'
-    + '</div></div>';
+  var lodgingMarkupHtml = teApprovalMarkupTable('Lodging', [
+    { label: 'Total Lodging Cost (incl. taxes & fees)', value: parseFloat(r.lodging_cost_total) || 0 }
+  ], multiplier);
+
+  var billableBreakdownHtml = '<div class="resume-section-title" style="margin-top:18px;">Billable to Prime Breakdown (' + multiplier.toFixed(4) + 'x on every ODC line except per-diem meals and EWW)</div>'
+    + '<div class="cfd-two-col">' + lodgingMarkupHtml + flightHtml + '</div>'
+    + '<div class="cfd-two-col">' + transportationHtml + otherOdcHtml + '</div>';
 
   var billingAssignmentHtml = '<div class="resume-section"><div class="resume-section-title">Billing Assignment (required to approve — employees don\'t know which SLIN to bill to)</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
@@ -1273,17 +1319,56 @@ async function openEstimateApproval(estimateId){
     + '<div><label class="field-label" for="te-approval-slin">SLIN</label><select class="field-input" id="te-approval-slin">' + teApprovalSlinOptionsHtml(r.task_order_node_id, r.slin_id) + '</select></div>'
     + '</div></div>';
 
-  detail.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Travel Estimate — ' + escAttr(names[r.created_by] || '—') + '</div>'
-    + demographicsHtml + travelersHtml + lodgingHtml + flightHtml + transportationHtml + otherOdcHtml + totalsHtml + billingAssignmentHtml
+  var footerHtml = billableBreakdownHtml + billingAssignmentHtml
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'
     + '<div class="profile-actions">'
     + '<button class="btn-save" onclick="estimateApprovalAction(\'' + r.id + '\',\'supervisor_approved\')">Approve (sends to Prime for authorization)</button>'
     + '<button class="btn-edit" onclick="estimateApprovalAction(\'' + r.id + '\',\'returned\')">Return</button>'
     + '<button class="btn-cancel" style="color:var(--red);border-color:var(--red);" onclick="estimateApprovalAction(\'' + r.id + '\',\'denied\')">Deny</button>'
-    + '<button class="btn-cancel" onclick="document.getElementById(\'travel-approval-detail\').innerHTML=\'\'">Close</button>'
-    + '</div></div>';
+    + '<button class="btn-cancel" onclick="teCloseEstimateReview()">Close</button>'
+    + '</div>';
+
+  detail.innerHTML = teFormHtml(r, null, {
+    title: 'Review Travel Estimate — ' + escAttr(names[r.created_by] || '—'),
+    headerHtml: approverDetailsHtml,
+    footerHtml: footerHtml
+  });
+  tePrefillForm(r);
+  // Everything the submitter entered is locked; only the EWW fields (which
+  // the submitter never saw) stay editable for the approver.
+  document.querySelectorAll('#te-form-fields input, #te-form-fields select, #te-form-fields textarea').forEach(function(el){
+    if(!el.classList.contains('te-eww-input')){ el.disabled = true; }
+  });
+  teRecalc();
+  teFormDirty = false;
+}
+
+function teCloseEstimateReview(){
+  teReview = null;
+  teFormDirty = false;
+  document.getElementById('travel-approval-detail').innerHTML = '';
+}
+
+// Persists the approver's per-traveler EWW entries plus the estimate-level
+// totals that depend on them. Everything else on the estimate is exactly as
+// submitted, so billable_grand_total is the stored ODC billable figure plus
+// the new EWW (EWW is never marked up).
+async function teSaveReviewEww(estimateId){
+  if(!teReview || teReview.id !== estimateId){ return; }
+  for(var i = 0; i < teTravelers.length; i++){
+    var t = teTravelers[i];
+    var { error: tErr } = await supabaseClient.from('travel_estimate_travelers').update({ eww_rate: t.ewwRate, eww_hours: t.ewwHours }).eq('estimate_id', estimateId).eq('traveler_number', t.slot);
+    if(tErr){ throw tErr; }
+  }
+  var ewwTotal = 0, rateSum = 0, hoursSum = 0;
+  teTravelers.forEach(function(t){ ewwTotal += t.ewwRate * t.ewwHours; rateSum += t.ewwRate; hoursSum += t.ewwHours; });
+  var n = teTravelers.length || 1;
+  var { error } = await supabaseClient.from('travel_estimates').update({
+    eww_total: ewwTotal, eww_rate: rateSum / n, eww_hours_per_trainer: hoursSum / n,
+    billable_grand_total: (parseFloat(teReview.row.billable_trip_lead_total) || 0) + ewwTotal
+  }).eq('id', estimateId);
+  if(error){ throw error; }
 }
 
 async function estimateApprovalAction(estimateId, decision){
@@ -1309,6 +1394,9 @@ async function estimateApprovalAction(estimateId, decision){
   try{
     var { data: existing } = await supabaseClient.from('travel_estimates').select('status').eq('id', estimateId).limit(1);
     var previousStatus = existing && existing.length ? existing[0].status : null;
+    // EWW entered during review is kept on Approve and Return (a returned
+    // estimate carries it through the employee's resubmit untouched).
+    if(decision !== 'denied'){ await teSaveReviewEww(estimateId); }
     var body = { status: decision };
     if(decision === 'supervisor_approved'){
       body.approved_by = travel.employeeId; body.approved_at = new Date().toISOString();
@@ -1344,7 +1432,7 @@ async function estimateApprovalAction(estimateId, decision){
       notifySelf('Travel estimate ' + decision, '<p>You ' + decision + ' a travel estimate' + (approvalNote ? ': ' + escAttr(approvalNote) : '.') + ' Switch to your Employee view to see the note.</p><p><a href="' + window.location.origin + window.location.pathname + '">Open the app</a></p>');
     }
 
-    document.getElementById('travel-approval-detail').innerHTML = '';
+    teCloseEstimateReview();
     loadApprovalsQueue();
   }catch(e){
     errorEl.textContent = 'Couldn\'t save decision. Try again.';
@@ -1462,6 +1550,11 @@ var texEditingRow = null;
 var texAvailableEstimates = [];
 var texLinkedEstimateTotals = { tripLead: 0, eww: 0 };
 
+// True while a Supervisor is reviewing a submitted expense report (see
+// openExpenseApproval) — texFormHtml renders the employee's same form
+// read-only, without upload/remove/add controls.
+var texReview = false;
+
 // Estimated-cost comparison figures (one per Actual Costs category), derived
 // from the linked travel_estimates row via texComputeEstimatedCosts — see
 // that function for the field mapping (direct 1:1s, the 5-field
@@ -1540,6 +1633,7 @@ async function loadMyExpenses(editId){
   var content = document.getElementById('travel-content');
   texEditingId = editId || null;
   texEditingRow = null;
+  texReview = false;
 
   if(!travel.employeeId){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">No employee record found</div><div class="placeholder-sub">Try switching roles and back, or refreshing the page.</div></div>';
@@ -1553,7 +1647,7 @@ async function loadMyExpenses(editId){
 
   try{
     if(texEditingId){
-      var { data: rows, error: editRowError } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number)').eq('id', texEditingId).limit(1);
+      var { data: rows, error: editRowError } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(' + texEstimateJoinColumns + ')').eq('id', texEditingId).limit(1);
       if(editRowError){ throw editRowError; }
       if(rows && rows.length){ texEditingRow = rows[0]; }
       else{ throw new Error('Expense report ' + texEditingId + ' was not found.'); }
@@ -1575,20 +1669,7 @@ async function loadMyExpenses(editId){
     }
 
     if(texEditingRow){
-      texLinkedEstimateTotals = {
-        tripLead: parseFloat(texEditingRow.travel_estimates && texEditingRow.travel_estimates.trip_lead_total) || 0,
-        eww: parseFloat(texEditingRow.travel_estimates && texEditingRow.travel_estimates.eww_total) || 0
-      };
-      texEstimatedCosts = texComputeEstimatedCosts(texEditingRow.travel_estimates);
-      texVarianceNotes = texEditingRow.variance_notes || {};
-      // A category with nothing estimated but a saved non-zero actual cost
-      // must have been added via Additional Expenses on a previous save —
-      // bring it back so its row reappears instead of the value going
-      // invisible (still saved, just no control showing it).
-      texAdditionalCategories = texCostCategories.filter(function(c){
-        return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && (parseFloat(texEditingRow[c.column]) || 0) > 0;
-      }).map(function(c){ return c.category; });
-      await texLoadReceiptsByCategory(texEditingRow.id);
+      await texLoadEditingState(texEditingRow);
     }
 
     content.innerHTML = texFormHtml(texEditingRow) + '<div class="tk-entry-card"><div class="tk-section-title">My Expense Reports</div>' + (await texRenderMyReportsTable()) + '</div>';
@@ -1601,6 +1682,28 @@ async function loadMyExpenses(editId){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">Couldn\'t load expense reports</div><div class="placeholder-sub">' + escAttr(e.message || 'Try refreshing the page.') + '</div></div>';
     console.error(e);
   }
+}
+
+// Loads everything texFormHtml/texPrefillForm need for an existing report —
+// shared by the employee's draft edit (loadMyExpenses) and the Supervisor's
+// review (openExpenseApproval) so both show the report the same way.
+var texEstimateJoinColumns = 'destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,number_of_trainers,per_diem_meals_rate,eww_rate,eww_hours_per_trainer,airfare_avg,airport_parking_transport,baggage,mileage,shipping_to,shipping_back,rental_car,fuel_gas,parking,tolls,rideshare_estimate,lodging_cost_total,tracking_number';
+
+async function texLoadEditingState(row){
+  texLinkedEstimateTotals = {
+    tripLead: parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0,
+    eww: parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0
+  };
+  texEstimatedCosts = texComputeEstimatedCosts(row.travel_estimates);
+  texVarianceNotes = row.variance_notes || {};
+  // A category with nothing estimated but a saved non-zero actual cost
+  // must have been added via Additional Expenses on a previous save —
+  // bring it back so its row reappears instead of the value going
+  // invisible (still saved, just no control showing it).
+  texAdditionalCategories = texCostCategories.filter(function(c){
+    return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && (parseFloat(row[c.column]) || 0) > 0;
+  }).map(function(c){ return c.category; });
+  await texLoadReceiptsByCategory(row.id);
 }
 
 // Builds the filtered, 2-column Actual Costs grid content — factored out so
@@ -1690,9 +1793,14 @@ function texRenderCategoryReceipts(category){
       : '<div style="width:32px;height:32px;border-radius:4px;background:rgba(127,127,127,0.15);display:flex;align-items:center;justify-content:center;font-size:15px;">📄</div>';
     return '<span style="position:relative;display:inline-block;margin:0 10px 6px 0;">'
       + '<a href="' + escAttr(rec.file_url) + '" target="_blank" title="' + escAttr(rec.file_name || 'Receipt') + '">' + thumb + '</a>'
-      + '<button type="button" class="btn-remove-row" style="position:absolute;top:-9px;right:-9px;font-size:16px;line-height:1;font-weight:700;padding:0;width:16px;height:16px;" title="Remove receipt" onclick="texRemoveReceiptForCategory(\'' + rec.id + '\')">&times;</button>'
+      + (texReview ? '' : '<button type="button" class="btn-remove-row" style="position:absolute;top:-9px;right:-9px;font-size:16px;line-height:1;font-weight:700;padding:0;width:16px;height:16px;" title="Remove receipt" onclick="texRemoveReceiptForCategory(\'' + rec.id + '\')">&times;</button>')
       + '</span>';
   }).join('');
+  if(texReview){
+    return '<div style="display:flex;align-items:center;flex-wrap:wrap;min-height:32px;">'
+      + (thumbsHtml || '<span class="placeholder-sub" style="margin:0;">None attached</span>')
+      + '</div>';
+  }
   return '<div style="display:flex;align-items:center;flex-wrap:wrap;">'
     + thumbsHtml
     + '<input type="file" accept="image/*,.pdf" style="display:none;" id="tex-receipt-input-' + category + '" onchange="texUploadReceiptForCategory(\'' + category + '\', this.files)">'
@@ -1716,6 +1824,9 @@ function texAdditionalExpensesSectionHtml(){
         return c ? texAdditionalExpenseRowHtml(c) : '';
       }).join('')
     + '</div>';
+  if(texReview){
+    return texAdditionalCategories.length ? rowsHtml : '<div class="tk-empty">None — everything expensed was on the original estimate.</div>';
+  }
   var available = texCostCategories.filter(function(c){
     return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && texAdditionalCategories.indexOf(c.category) === -1;
   });
@@ -1736,7 +1847,7 @@ function texAdditionalExpensesSectionHtml(){
 // always required, not conditional on the 10% threshold).
 function texAdditionalExpenseRowHtml(c){
   return '<div style="margin-bottom:18px;position:relative;" id="tex-additional-row-' + c.category + '">'
-    + '<button type="button" class="btn-remove-row" style="position:absolute;top:0;right:0;font-size:18px;line-height:1;font-weight:700;" title="Remove this expense" onclick="texRemoveAdditionalExpense(\'' + c.category + '\')">&times;</button>'
+    + (texReview ? '' : '<button type="button" class="btn-remove-row" style="position:absolute;top:0;right:0;font-size:18px;line-height:1;font-weight:700;" title="Remove this expense" onclick="texRemoveAdditionalExpense(\'' + c.category + '\')">&times;</button>')
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
     + '<div><label class="field-label" for="' + c.fieldId + '">' + escAttr(c.label) + '</label>' + currencyInputHtml(c.fieldId, 0, 'texRecalc') + '</div>'
     + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" style="margin:0;">—</div></div></div>'
@@ -1764,7 +1875,9 @@ function texRemoveAdditionalExpense(category){
   texRecalc();
 }
 
-function texFormHtml(row){
+// review (Supervisor approval only): { title, headerHtml, footerHtml } — same
+// idea as teFormHtml's review mode.
+function texFormHtml(row, review){
   var isNew = !row;
   var estimatePickerHtml = isNew
     ? (texAvailableEstimates.length
@@ -1778,14 +1891,24 @@ function texFormHtml(row){
       + travelReadOnlyField('Tracking Number', row.travel_estimates ? row.travel_estimates.tracking_number : '—')
       + travelReadOnlyField('Estimated Grand Total', '$' + ((parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0) + (parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0)).toFixed(2)) + '</div>';
 
-  return '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">' + (row ? 'Edit Draft Expense Report' : 'New Travel Expense Report') + '</div>'
+  var actionsHtml = review
+    ? review.footerHtml
+    : '<div class="profile-actions">'
+      + '<button class="btn-save" onclick="submitTravelExpense(\'submitted\')">Submit Expense Report</button>'
+      + '<button class="btn-cancel" onclick="submitTravelExpense(\'draft\')">Save as Draft</button>'
+      + '<button class="btn-cancel" onclick="loadMyExpenses()">Cancel</button>'
+      + '</div>';
+
+  return '<div class="tk-entry-card' + (review ? ' travel-review' : '') + '">'
+    + '<div class="tk-section-title">' + (review ? review.title : row ? 'Edit Draft Expense Report' : 'New Travel Expense Report') + '</div>'
+    + (review ? review.headerHtml : '')
     + estimatePickerHtml
     + '<div id="tex-form-body" style="' + (isNew ? 'display:none;' : '') + '">'
+    + '<div id="tex-form-fields">'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
     + '<div><label class="field-label" for="tex-actual-leave-date">Actual Leave Date</label><input type="date" class="field-input" id="tex-actual-leave-date" oninput="texRecalc()"></div>'
     + '<div><label class="field-label" for="tex-actual-return-date">Actual Return Date</label><input type="date" class="field-input" id="tex-actual-return-date" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label" for="tex-trainers">Number of Trainers</label><input type="number" min="1" step="1" class="field-input" id="tex-trainers" value="1" oninput="texRecalc()"></div>'
+    + '<div><label class="field-label" for="tex-trainers">Number of Travelers</label><input type="number" min="1" step="1" class="field-input" id="tex-trainers" value="1" oninput="texRecalc()"></div>'
     + '</div>'
     + '<div class="resume-section"><div class="resume-section-title">Per Diem / EWW (formula-based)</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
@@ -1810,12 +1933,10 @@ function texFormHtml(row){
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Actual Grand Total</div><div class="tk-pto-stat-val" id="tex-total-grand">$0.00</div></div>'
     + '<div class="tk-pto-stat-box"><div class="tk-pto-stat-label">Variance vs. Estimate</div><div class="tk-pto-stat-val" id="tex-total-variance">$0.00</div></div>'
     + '</div></div>'
-    + '<div class="profile-actions">'
-    + '<button class="btn-save" onclick="submitTravelExpense(\'submitted\')">Submit Expense Report</button>'
-    + '<button class="btn-cancel" onclick="submitTravelExpense(\'draft\')">Save as Draft</button>'
-    + '<button class="btn-cancel" onclick="loadMyExpenses()">Cancel</button>'
-    + '</div></div>'
-    + '<div class="login-error" id="tex-form-error"></div>'
+    + '</div>'
+    + actionsHtml
+    + '</div>'
+    + (review ? '' : '<div class="login-error" id="tex-form-error"></div>')
     + '</div>';
 }
 
@@ -1953,7 +2074,7 @@ function renderTexReadOnlyDetail(r){
     + '<div class="profile-grid">'
     + travelReadOnlyField('Tracking Number', est.tracking_number || '—')
     + travelReadOnlyField('Actual Dates', formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date))
-    + travelReadOnlyField('Number of Trainers', r.number_of_trainers)
+    + travelReadOnlyField('Number of Travelers', r.number_of_trainers)
     + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.actual_trip_lead_total) || 0).toFixed(2))
     + travelReadOnlyField('EWW Total', '$' + (parseFloat(r.actual_eww_total) || 0).toFixed(2))
     + travelReadOnlyField('Actual Grand Total', '$' + grand.toFixed(2))
@@ -2207,47 +2328,62 @@ async function submitTravelExpense(targetStatus){
 async function openExpenseApproval(expenseId){
   var detail = document.getElementById('travel-approval-detail');
   detail.innerHTML = '<div class="tk-entry-card"><div class="placeholder-sub">Loading...</div></div>';
-  var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(destination_event,event_name,leave_date,return_date)').eq('id', expenseId).limit(1);
+  var { data: rows } = await supabaseClient.from('travel_expenses').select('*, travel_estimates(' + texEstimateJoinColumns + ')').eq('id', expenseId).limit(1);
   if(!rows || !rows.length){ detail.innerHTML = ''; return; }
   var r = rows[0];
   var est = r.travel_estimates || {};
   var names = await employeeNamesById([r.created_by]);
-  var grand = (parseFloat(r.actual_trip_lead_total) || 0) + (parseFloat(r.actual_eww_total) || 0);
-  var variance = parseFloat(r.variance_total) || 0;
 
-  var { data: receipts } = await supabaseClient.from('travel_expense_receipts').select('*').eq('expense_id', expenseId).order('uploaded_at');
-  var receiptsHtml = (receipts && receipts.length)
-    ? receipts.map(function(rec){ return '<div class="resume-cart-item"><a href="' + rec.file_url + '" target="_blank">' + escAttr(rec.file_name || 'Receipt') + '</a></div>'; }).join('')
-    : '<div class="tk-empty">No receipts attached.</div>';
+  // Same form the employee filled out, loaded the same way their draft
+  // edit does, rendered read-only.
+  texReview = true;
+  await texLoadEditingState(r);
 
-  var varianceNotes = r.variance_notes || {};
-  var varianceNoteKeys = Object.keys(varianceNotes);
-  var varianceNotesHtml = varianceNoteKeys.length
-    ? '<div class="resume-section"><div class="resume-section-title">Variance Explanations</div>' + varianceNoteKeys.map(function(cat){
-        var meta = texCostCategories.find(function(c){ return c.category === cat; });
-        return '<div class="warning-box"><div><div class="warning-box-title">' + escAttr(meta ? meta.label : cat) + '</div><div class="warning-box-text">' + escAttr(varianceNotes[cat]) + '</div></div></div>';
-      }).join('') + '</div>'
+  var overCount = texCostCategories.filter(function(c){
+    return texIsVarianceOver10Pct(r[c.column], texEstimatedCosts[c.estimatedKey]);
+  }).length;
+  var approverDetailsHtml = '<div class="resume-section"><div class="resume-section-title">Approver Details</div>'
+    + '<div class="profile-grid">'
+    + travelReadOnlyField('Submitted By', names[r.created_by] || '—')
+    + travelReadOnlyField('Estimated Dates', formatDate(est.leave_date) + ' – ' + formatDate(est.return_date))
+    + travelReadOnlyField('Categories >10% Over Estimate', String(overCount))
+    + travelReadOnlyField('Added Categories (not on estimate)', String(texAdditionalCategories.length))
+    + '</div>'
+    + '<div class="placeholder-sub" style="margin-top:8px;">Below is the expense report exactly as submitted, with the employee\'s explanations for anything over estimate or added.</div>'
+    + '</div>';
+
+  // Receipts saved without a category (older uploads) wouldn't show up in
+  // any Actual Costs row — list them separately so nothing is hidden.
+  var otherReceipts = texReceiptsByCategory.other || [];
+  var otherReceiptsHtml = otherReceipts.length
+    ? '<div class="resume-section"><div class="resume-section-title">Other Receipts (no category)</div>'
+      + otherReceipts.map(function(rec){ return '<div class="resume-cart-item"><a href="' + escAttr(rec.file_url) + '" target="_blank">' + escAttr(rec.file_name || 'Receipt') + '</a></div>'; }).join('')
+      + '</div>'
     : '';
 
-  detail.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Expense Report — ' + escAttr(names[r.created_by] || '—') + '</div>'
-    + '<div class="profile-grid">'
-    + travelReadOnlyField('Destination', est.destination_event)
-    + travelReadOnlyField('Event Name', est.event_name)
-    + travelReadOnlyField('Actual Dates', formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date))
-    + travelReadOnlyField('Actual Grand Total', '$' + grand.toFixed(2))
-    + travelReadOnlyField('Variance vs. Estimate', (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2))
-    + '</div>'
-    + varianceNotesHtml
-    + '<div class="resume-section"><div class="resume-section-title">Receipts</div>' + receiptsHtml + '</div>'
+  var footerHtml = otherReceiptsHtml
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'
     + '<div class="profile-actions">'
     + '<button class="btn-save" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + r.estimate_id + '\',\'approved\')">Approve (finalizes reimbursement)</button>'
     + '<button class="btn-edit" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + r.estimate_id + '\',\'returned\')">Return</button>'
     + '<button class="btn-cancel" style="color:var(--red);border-color:var(--red);" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + r.estimate_id + '\',\'denied\')">Deny</button>'
-    + '<button class="btn-cancel" onclick="document.getElementById(\'travel-approval-detail\').innerHTML=\'\'">Close</button>'
-    + '</div></div>';
+    + '<button class="btn-cancel" onclick="texCloseExpenseReview()">Close</button>'
+    + '</div>';
+
+  detail.innerHTML = texFormHtml(r, {
+    title: 'Review Expense Report — ' + escAttr(names[r.created_by] || '—'),
+    headerHtml: approverDetailsHtml,
+    footerHtml: footerHtml
+  });
+  texPrefillForm(r);
+  document.querySelectorAll('#tex-form-fields input, #tex-form-fields select, #tex-form-fields textarea').forEach(function(el){ el.disabled = true; });
+  texRecalc();
+}
+
+function texCloseExpenseReview(){
+  texReview = false;
+  document.getElementById('travel-approval-detail').innerHTML = '';
 }
 
 async function expenseApprovalAction(expenseId, estimateId, decision){
@@ -2277,7 +2413,7 @@ async function expenseApprovalAction(expenseId, estimateId, decision){
       field_changes: { note: noteField ? noteField.value.trim() : null }, previous_status: previousStatus, new_status: body.current_status
     });
 
-    document.getElementById('travel-approval-detail').innerHTML = '';
+    texCloseExpenseReview();
     loadApprovalsQueue();
   }catch(e){
     errorEl.textContent = 'Couldn\'t save decision. Try again.';

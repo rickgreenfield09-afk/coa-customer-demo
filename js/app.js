@@ -317,7 +317,9 @@ function openModal(titleHtml, bodyHtml, footerHtml){
   document.getElementById('app-modal').classList.add('active');
 }
 function closeModal(){
-  document.getElementById('app-modal').classList.remove('active');
+  var m = document.getElementById('app-modal');
+  m.classList.remove('active');
+  m.classList.remove('modal-wide');
 }
 
 // ---------- Appearance (light/dark theme, Settings screen) ----------

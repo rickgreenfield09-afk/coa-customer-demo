@@ -924,7 +924,25 @@ async function teEnsureDraftId(){
   }
 }
 
-async function submitTravelEstimate(targetStatus){
+// Policy acknowledgment shown (as an in-app modal, not a browser dialog) every
+// time an estimate is submitted or resubmitted. Submission only goes ahead
+// from the Acknowledge button; the acknowledgment is recorded on the audit log.
+function teShowAcknowledgment(){
+  document.getElementById('app-modal').classList.add('modal-wide');
+  openModal('Travel Estimate and Itinerary Acknowledgment',
+    '<p>Approval applies only to the submitted business travel dates, itinerary, and estimated expenses. Travelers are expected to follow the approved itinerary and accept reasonable carrier-provided alternatives when delays or disruptions occur.</p>'
+    + '<p>Any traveler-elected change that extends the trip or creates additional costs must be approved by the traveler’s supervisor before the change is made, unless an emergency prevents advance approval. Without such approval, additional lodging, meals and incidental expenses, transportation, or other costs resulting from the traveler’s decision will be considered personal expenses and will not be reimbursed. Any additional travel time resulting from the personal change must be recorded as PTO in accordance with company policy.</p>'
+    + '<p>Changes required by the company or customer, carrier cancellations, emergencies, legitimate safety concerns, or other circumstances outside the traveler’s control must be reported promptly and will be reviewed separately.</p>'
+    + '<p><strong>By selecting “Acknowledge,” I confirm that I understand and agree to these requirements.</strong></p>',
+    '<button class="btn-cancel" onclick="closeModal()">Cancel</button><button class="btn-save" onclick="teAcknowledgeAndSubmit()">Acknowledge</button>');
+}
+
+function teAcknowledgeAndSubmit(){
+  closeModal();
+  submitTravelEstimate('submitted', true);
+}
+
+async function submitTravelEstimate(targetStatus, acknowledged){
   var errorEl = document.getElementById('te-form-error');
   errorEl.textContent = '';
   var inputs = teReadFormInputs();
@@ -953,6 +971,13 @@ async function submitTravelEstimate(targetStatus){
     }
   }
 
+  // Everything is valid: the traveler must acknowledge the itinerary policy
+  // before the estimate is actually submitted.
+  if(targetStatus === 'submitted' && !acknowledged){
+    teShowAcknowledgment();
+    return;
+  }
+
   var body = built.body;
 
   try{
@@ -973,6 +998,7 @@ async function submitTravelEstimate(targetStatus){
     await supabaseClient.from('travel_estimate_audit_log').insert({
       estimate_id: newId, changed_by: currentProfile.id,
       action: (previousStatus && previousStatus !== targetStatus) ? 'status_change' : 'edit',
+      field_changes: (targetStatus === 'submitted' && acknowledged) ? { acknowledged_itinerary_policy: true } : null,
       previous_status: previousStatus, new_status: targetStatus
     });
 
@@ -1160,7 +1186,7 @@ async function loadApprovalsQueue(){
   try{
     var [{ data: pendingEst }, { data: pendingExp }] = await Promise.all([
       supabaseClient.from('travel_estimates').select('id,destination_event,event_name,leave_date,return_date,trip_lead_total,eww_total,created_by').eq('status', 'submitted').order('created_at'),
-      supabaseClient.from('travel_expenses').select('id,estimate_id,current_status,supervisor_status,actual_trip_lead_total,actual_eww_total,variance_total,created_by').eq('current_status', 'submitted').eq('supervisor_status', 'pending').order('created_at')
+      supabaseClient.from('travel_expenses').select('id,estimate_id,current_status,supervisor_status,actual_trip_lead_total,actual_eww_total,variance_total,created_by,event_name,destination_event,tracking_number,travel_estimates(destination_event,event_name,tracking_number)').eq('current_status', 'submitted').eq('supervisor_status', 'pending').order('created_at')
     ]);
     pendingEst = pendingEst || []; pendingExp = pendingExp || [];
 
@@ -1180,12 +1206,15 @@ async function loadApprovalsQueue(){
 
     var expHtml = '<div class="tk-entry-card"><div class="tk-section-title">Expense Reports Needing Approval (' + pendingExp.length + ')</div>'
       + (pendingExp.length
-          ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Employee</th><th>Actual Total</th><th>Variance</th><th></th></tr></thead><tbody>'
+          ? '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Employee</th><th>Trip / Event</th><th>Tracking #</th><th>Actual Total</th><th>Variance</th><th></th></tr></thead><tbody>'
             + pendingExp.map(function(r){
                 var grand = (parseFloat(r.actual_trip_lead_total) || 0) + (parseFloat(r.actual_eww_total) || 0);
                 var variance = parseFloat(r.variance_total) || 0;
-                return '<tr><td>' + escAttr(namesById[r.created_by] || '—') + '</td><td>$' + grand.toFixed(2) + '</td>'
-                  + '<td>' + (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2) + '</td>'
+                var xi = texTripInfo(r);
+                return '<tr><td>' + escAttr(namesById[r.created_by] || '—') + '</td>'
+                  + '<td>' + escAttr(xi.destination || '—') + (xi.event ? ' — ' + escAttr(xi.event) : '') + (xi.standalone ? ' <span class="placeholder-sub" style="display:inline;">(no travel request)</span>' : '') + '</td>'
+                  + '<td>' + escAttr(xi.tracking || '—') + '</td><td>$' + grand.toFixed(2) + '</td>'
+                  + '<td>' + (xi.standalone ? '—' : (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2)) + '</td>'
                   + '<td><button class="tk-now-btn" type="button" onclick="openExpenseApproval(\'' + r.id + '\')">Review</button></td></tr>';
               }).join('') + '</tbody></table></div>'
           : '<div class="tk-empty">Nothing pending.</div>') + '</div>';
@@ -1679,6 +1708,11 @@ var texLinkedEstimateTotals = { tripLead: 0, eww: 0 };
 // read-only, without upload/remove/add controls.
 var texReview = false;
 
+// True for an expense report that is not tied to a travel request: there is no
+// estimate to compare against, every category is in the main grid, and the
+// tracking number is issued at its first approval (SLIN picked by the approver).
+var texStandalone = false;
+
 // Estimated-cost comparison figures (one per Actual Costs category), derived
 // from the linked travel_estimates row via texComputeEstimatedCosts — see
 // that function for the field mapping (direct 1:1s, the 5-field
@@ -1758,6 +1792,8 @@ async function loadMyExpenses(editId){
   texEditingId = editId || null;
   texEditingRow = null;
   texReview = false;
+  texStandalone = false;
+  texLinkedEstimateTotals = { tripLead: 0, eww: 0 };
 
   if(!travel.employeeId){
     content.innerHTML = '<div class="placeholder-card"><div class="placeholder-title">No employee record found</div><div class="placeholder-sub">Try switching roles and back, or refreshing the page.</div></div>';
@@ -1812,6 +1848,49 @@ async function loadMyExpenses(editId){
   }
 }
 
+// Trip identity for an expense report: a linked report takes it from its
+// estimate; a standalone one (no travel request) carries its own.
+function texTripInfo(r){
+  var est = r.travel_estimates || {};
+  return {
+    destination: est.destination_event || r.destination_event || null,
+    event: est.event_name || r.event_name || null,
+    tracking: r.tracking_number || est.tracking_number || null,
+    standalone: !r.estimate_id
+  };
+}
+
+// Email subject label: "City, ST" (or the event) plus the tracking number once issued.
+function texSubjectLabel(r){
+  var i = texTripInfo(r);
+  return (i.destination || i.event || 'your expense report') + teTrackingSuffix(i.tracking);
+}
+
+// Shape teNoticeHtml expects.
+function texNoticeIdentity(r){
+  var i = texTripInfo(r);
+  return { destination_event: i.destination, event_name: i.event, tracking_number: i.tracking };
+}
+
+function texReadStandaloneFields(){
+  var val = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  var city = val('tex-sa-city'), state = val('tex-sa-state');
+  return {
+    eventName: val('tex-sa-event'), city: city, state: state,
+    destination: (city && state) ? city + ', ' + state : (city || state || null),
+    contractId: val('tex-sa-contract')
+  };
+}
+
+// Switches the open form between "linked to an estimate" and "standalone".
+function texSetStandaloneMode(on){
+  texStandalone = on;
+  var show = function(id, visible){ var el = document.getElementById(id); if(el){ el.style.display = visible ? '' : 'none'; } };
+  show('tex-standalone-fields', on);
+  show('tex-eww-box', !on);
+  show('tex-additional-section', !on);
+}
+
 // The note the Supervisor typed when returning/denying this expense report.
 async function texFetchRejectionNote(expenseId){
   try{
@@ -1835,13 +1914,14 @@ async function texLoadEditingState(row){
     tripLead: parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0,
     eww: parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0
   };
+  texStandalone = !row.estimate_id;
   texEstimatedCosts = texComputeEstimatedCosts(row.travel_estimates);
   texVarianceNotes = row.variance_notes || {};
   // A category with nothing estimated but a saved non-zero actual cost
   // must have been added via Additional Expenses on a previous save —
   // bring it back so its row reappears instead of the value going
   // invisible (still saved, just no control showing it).
-  texAdditionalCategories = texCostCategories.filter(function(c){
+  texAdditionalCategories = texStandalone ? [] : texCostCategories.filter(function(c){
     return (parseFloat(texEstimatedCosts[c.estimatedKey]) || 0) === 0 && (parseFloat(row[c.column]) || 0) > 0;
   }).map(function(c){ return c.category; });
   await texLoadReceiptsByCategory(row.id);
@@ -1852,6 +1932,13 @@ async function texLoadEditingState(row){
 // report, texFormHtml renders this once before any estimate is selected, so
 // every category would otherwise be filtered out as "nothing estimated").
 function texActualCostsGridHtml(){
+  if(texStandalone){
+    // No estimate to compare against: every category is available, with no
+    // Estimated figure and no variance box.
+    return texCostCategories.map(function(c){
+      return texActualCostRow(c.label, c.fieldId, c.category, 0, null);
+    }).join('');
+  }
   return texCostCategories.filter(function(c){
     // Nothing was estimated for this category on the original request
     // (e.g. no tolls expected) — no control group needed for it here.
@@ -1899,7 +1986,7 @@ function texActualCostRow(label, fieldId, category, actualValue, estimatedValue)
   return '<div style="margin-bottom:18px;">'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 0.5fr 1fr;align-items:end;">'
     + '<div><label class="field-label" for="' + fieldId + '">' + escAttr(label) + '</label>' + currencyInputHtml(fieldId, actualValue, 'texRecalc') + '</div>'
-    + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-estimated-' + category + '" style="margin:0;">$' + (parseFloat(estimatedValue) || 0).toFixed(2) + '</div></div></div>'
+    + '<div><label class="field-label">Estimated</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-estimated-' + category + '" style="margin:0;">' + (estimatedValue === null ? '—' : '$' + (parseFloat(estimatedValue) || 0).toFixed(2)) + '</div></div></div>'
     + '<div><label class="field-label">Receipts</label><div id="tex-receipts-cell-' + category + '">' + texRenderCategoryReceipts(category) + '</div></div>'
     + '</div>'
     + '<div class="warning-box" id="tex-variance-wrap-' + category + '" style="' + (varianceOver ? '' : 'display:none;') + 'margin-top:10px;">'
@@ -1959,6 +2046,7 @@ function texRenderCategoryReceipts(category){
 // estimated" note is always required, not just past the 10% threshold.
 
 function texAdditionalExpensesSectionHtml(){
+  if(texStandalone){ return ''; }
   var rowsHtml = '<div id="tex-additional-costs-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;">'
     + texAdditionalCategories.map(function(cat){
         var c = texCostCategories.find(function(x){ return x.category === cat; });
@@ -2020,21 +2108,25 @@ function texRemoveAdditionalExpense(category){
 // idea as teFormHtml's review mode.
 function texFormHtml(row, review, returnNote){
   var isNew = !row;
+  var isStandaloneRow = !!(row && !row.estimate_id);
   var isReturned = !!(row && row.current_status === 'returned');
   var returnBannerHtml = isReturned
     ? '<div class="warning-box"><div><div class="warning-box-title">This report was returned</div><div class="warning-box-text">' + escAttr(returnNote || 'No note was left.') + '</div></div></div>'
     : '';
   var estimatePickerHtml = isNew
-    ? (texAvailableEstimates.length
-        ? '<div class="tk-pto-form-grid" style="grid-template-columns:1fr;"><div><label class="field-label" for="tex-estimate-select">Authorized Estimate</label>'
-          + '<select class="field-input" id="tex-estimate-select" onchange="texEstimateSelected()"><option value="">— Select an authorized estimate —</option>'
-          + texAvailableEstimates.map(function(e){ return '<option value="' + e.id + '">' + escAttr(e.destination_event || '—') + (e.event_name ? ' — ' + escAttr(e.event_name) : '') + ' (' + formatDate(e.leave_date) + ' – ' + formatDate(e.return_date) + ')' + (e.tracking_number ? ' [' + e.tracking_number + ']' : '') + '</option>'; }).join('')
-          + '</select></div></div>'
-        : '<div class="placeholder-sub" style="margin-bottom:14px;">No authorized estimates available to expense yet — an estimate must be Supervisor-approved and Customer-authorized first.</div>')
-    : '<div class="profile-grid">' + travelReadOnlyField('Destination', row.travel_estimates ? row.travel_estimates.destination_event : '—')
-      + travelReadOnlyField('Event Name', row.travel_estimates ? row.travel_estimates.event_name : '—')
-      + travelReadOnlyField('Tracking Number', row.travel_estimates ? row.travel_estimates.tracking_number : '—')
-      + travelReadOnlyField('Estimated Grand Total', '$' + ((parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0) + (parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0)).toFixed(2)) + '</div>';
+    ? '<div class="tk-pto-form-grid" style="grid-template-columns:1fr;"><div><label class="field-label" for="tex-estimate-select">Authorized Estimate</label>'
+      + '<select class="field-input" id="tex-estimate-select" onchange="texEstimateSelected()"><option value="">— Select an authorized estimate, or "No travel request" —</option>'
+      + texAvailableEstimates.map(function(e){ return '<option value="' + e.id + '">' + escAttr(e.destination_event || '—') + (e.event_name ? ' — ' + escAttr(e.event_name) : '') + ' (' + formatDate(e.leave_date) + ' – ' + formatDate(e.return_date) + ')' + (e.tracking_number ? ' [' + e.tracking_number + ']' : '') + '</option>'; }).join('')
+      + '<option value="__standalone__">No travel request (standalone expense)</option>'
+      + '</select></div></div>'
+      + (texAvailableEstimates.length ? '' : '<div class="placeholder-sub" style="margin-bottom:14px;">No authorized estimates are waiting to be expensed. You can still file an expense that is not tied to a travel request.</div>')
+    : isStandaloneRow
+      ? '<div class="profile-grid">' + travelReadOnlyField('Travel Request', 'None (standalone expense)')
+        + travelReadOnlyField('Tracking Number', row.tracking_number || 'Assigned on first approval') + '</div>'
+      : '<div class="profile-grid">' + travelReadOnlyField('Destination', row.travel_estimates ? row.travel_estimates.destination_event : '—')
+        + travelReadOnlyField('Event Name', row.travel_estimates ? row.travel_estimates.event_name : '—')
+        + travelReadOnlyField('Tracking Number', row.travel_estimates ? row.travel_estimates.tracking_number : '—')
+        + travelReadOnlyField('Estimated Grand Total', '$' + ((parseFloat(row.travel_estimates && row.travel_estimates.trip_lead_total) || 0) + (parseFloat(row.travel_estimates && row.travel_estimates.eww_total) || 0)).toFixed(2)) + '</div>';
 
   var actionsHtml = review
     ? review.footerHtml
@@ -2051,6 +2143,17 @@ function texFormHtml(row, review, returnNote){
     + estimatePickerHtml
     + '<div id="tex-form-body" style="' + (isNew ? 'display:none;' : '') + '">'
     + '<div id="tex-form-fields">'
+    + '<div id="tex-standalone-fields" style="' + (isStandaloneRow ? '' : 'display:none;') + '">'
+    + '<div class="tk-pto-form-grid" style="grid-template-columns:2fr 1fr 90px 1.5fr;">'
+    + '<div><label class="field-label" for="tex-sa-event">Event / Purpose</label><input class="field-input" id="tex-sa-event" placeholder="What was this expense for?"></div>'
+    + '<div><label class="field-label" for="tex-sa-city">City</label><input class="field-input" id="tex-sa-city" placeholder="City"></div>'
+    + '<div><label class="field-label" for="tex-sa-state">State</label><input class="field-input" id="tex-sa-state" list="tex-state-list" placeholder="ST" autocomplete="off"><datalist id="tex-state-list">'
+    + teUsStates.map(function(st){ return '<option value="' + st.abbr + '">' + st.name + '</option>'; }).join('')
+    + '</datalist></div>'
+    + '<div><label class="field-label" for="tex-sa-contract">Contract</label><select class="field-input" id="tex-sa-contract">' + contractOptionsHtml(row ? row.contract_id : null) + '</select></div>'
+    + '</div>'
+    + '<div class="placeholder-sub" style="margin-bottom:10px;">This expense is not tied to a travel request, so there is no estimate to compare it against. The Supervisor picks the Task Order and SLIN when approving, and the tracking number is issued then.</div>'
+    + '</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
     + '<div><label class="field-label" for="tex-actual-leave-date">Actual Leave Date</label><input type="date" class="field-input" id="tex-actual-leave-date" oninput="texRecalc()"></div>'
     + '<div><label class="field-label" for="tex-actual-return-date">Actual Return Date</label><input type="date" class="field-input" id="tex-actual-return-date" oninput="texRecalc()"></div>'
@@ -2059,7 +2162,7 @@ function texFormHtml(row, review, returnNote){
     + '<div class="resume-section"><div class="resume-section-title">Per Diem / EWW (formula-based)</div>'
     + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr;">'
     + '<div><label class="field-label" for="tex-meals-rate">Meals (M&amp;IE) Rate (per day)</label><input type="number" step="0.01" class="field-input" id="tex-meals-rate" value="0" oninput="texRecalc()"></div>'
-    + '<div><label class="field-label">EWW Total (verified by payroll on the approved estimate)</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-eww-display" style="margin:0;">$0.00</div></div></div>'
+    + '<div id="tex-eww-box" style="' + (isStandaloneRow ? 'display:none;' : '') + '"><label class="field-label">EWW Total (verified by payroll on the approved estimate)</label><div class="info-box" style="padding:12px 14px;"><div class="info-val" id="tex-eww-display" style="margin:0;">$0.00</div></div></div>'
     + '</div>'
     + '<div class="profile-grid" style="margin-top:4px;">'
     + '<div class="info-box"><div class="info-label">Nights</div><div class="info-val" id="tex-calc-nights">0</div></div>'
@@ -2067,7 +2170,7 @@ function texFormHtml(row, review, returnNote){
     + '</div></div>'
     + '<div class="resume-section"><div class="resume-section-title">Actual Costs (receipt-backed)</div>'
     + '<div id="tex-actual-costs-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;">' + texActualCostsGridHtml() + '</div></div>'
-    + '<div class="resume-section"><div class="resume-section-title">Additional Expenses (Not on Original Estimate)</div>'
+    + '<div class="resume-section" id="tex-additional-section" style="' + (isStandaloneRow ? 'display:none;' : '') + '"><div class="resume-section-title">Additional Expenses (Not on Original Estimate)</div>'
     + '<div class="placeholder-sub" style="margin-bottom:10px;">Paid for something that wasn\'t in your estimate — like baggage fees you didn\'t plan for? Add it here.</div>'
     + '<div id="tex-additional-expenses-wrap">' + texAdditionalExpensesSectionHtml() + '</div></div>'
     + '<div class="tk-entry-card" style="margin-top:14px;margin-bottom:0;">'
@@ -2089,6 +2192,23 @@ function texEstimateSelected(){
   var id = document.getElementById('tex-estimate-select').value;
   var formBody = document.getElementById('tex-form-body');
   if(!id){ formBody.style.display = 'none'; return; }
+  if(id === '__standalone__'){
+    texSetStandaloneMode(true);
+    texLinkedEstimateTotals = { tripLead: 0, eww: 0 };
+    texEstimatedCosts = texComputeEstimatedCosts(null);
+    formBody.style.display = '';
+    document.getElementById('tex-actual-leave-date').value = '';
+    document.getElementById('tex-actual-return-date').value = '';
+    document.getElementById('tex-trainers').value = 1;
+    document.getElementById('tex-meals-rate').value = 0;
+    texReceiptsByCategory = {};
+    texAdditionalCategories = [];
+    var saGrid = document.getElementById('tex-actual-costs-grid');
+    if(saGrid){ saGrid.innerHTML = texActualCostsGridHtml(); }
+    texRecalc();
+    return;
+  }
+  texSetStandaloneMode(false);
   var est = texAvailableEstimates.filter(function(e){ return e.id === id; })[0];
   if(!est){ return; }
   texLinkedEstimateTotals = { tripLead: parseFloat(est.trip_lead_total) || 0, eww: parseFloat(est.eww_total) || 0 };
@@ -2115,6 +2235,14 @@ function texPrefillForm(row){
   document.getElementById('tex-actual-return-date').value = row.actual_return_date || '';
   document.getElementById('tex-trainers').value = row.number_of_trainers || 1;
   document.getElementById('tex-meals-rate').value = row.per_diem_meals_rate || 0;
+  if(!row.estimate_id){
+    document.getElementById('tex-sa-event').value = row.event_name || '';
+    var saDest = row.destination_event || '';
+    var saCut = saDest.lastIndexOf(', ');
+    document.getElementById('tex-sa-city').value = saCut > 0 ? saDest.slice(0, saCut) : saDest;
+    document.getElementById('tex-sa-state').value = saCut > 0 ? saDest.slice(saCut + 2) : '';
+    document.getElementById('tex-sa-contract').value = row.contract_id || '';
+  }
   // Categories with nothing estimated (and not added via Additional
   // Expenses) aren't rendered, so guard each lookup.
   texCostCategories.forEach(function(c){
@@ -2177,7 +2305,7 @@ function texRecalc(){
   var ewwDisplayEl = document.getElementById('tex-eww-display');
   if(ewwDisplayEl){ ewwDisplayEl.textContent = '$' + calc.ewwTotal.toFixed(2); }
   document.getElementById('tex-total-grand').textContent = '$' + grand.toFixed(2);
-  document.getElementById('tex-total-variance').textContent = (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2);
+  document.getElementById('tex-total-variance').textContent = texStandalone ? '—' : (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2);
 
   texCostCategories.forEach(function(c){
     var fieldEl = document.getElementById(c.fieldId);
@@ -2191,39 +2319,40 @@ function texRecalc(){
 }
 
 async function texRenderMyReportsTable(){
-  var { data: rows } = await supabaseClient.from('travel_expenses').select('id,current_status,actual_trip_lead_total,actual_eww_total,variance_total,travel_estimates(destination_event,event_name,leave_date,return_date)').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
+  var { data: rows } = await supabaseClient.from('travel_expenses').select('id,estimate_id,current_status,actual_trip_lead_total,actual_eww_total,variance_total,event_name,destination_event,tracking_number,actual_leave_date,actual_return_date,travel_estimates(destination_event,event_name,leave_date,return_date,tracking_number)').eq('created_by', travel.employeeId).order('created_at', { ascending: false });
   rows = rows || [];
   if(!rows.length){ return '<div class="tk-empty">No expense reports yet.</div>'; }
   return '<div class="tk-grid-table-wrap"><table class="tk-grid-table"><thead><tr><th>Destination / Event</th><th>Dates</th><th>Status</th><th>Actual Grand Total</th><th>Variance</th><th></th></tr></thead><tbody>'
     + rows.map(function(r){
         var est = r.travel_estimates || {};
+        var info = texTripInfo(r);
         var grand = (parseFloat(r.actual_trip_lead_total) || 0) + (parseFloat(r.actual_eww_total) || 0);
         var variance = parseFloat(r.variance_total) || 0;
         var action = '<button class="tk-now-btn" type="button" onclick="loadMyExpenses(\'' + r.id + '\')">' + (r.current_status === 'draft' ? 'Edit Draft' : r.current_status === 'returned' ? 'Edit & Resubmit' : 'View') + '</button>';
-        return '<tr><td>' + escAttr(est.destination_event || '—') + (est.event_name ? ' — ' + escAttr(est.event_name) : '') + '</td><td>' + formatDate(est.leave_date) + ' – ' + formatDate(est.return_date) + '</td>'
+        return '<tr><td>' + escAttr(info.destination || '—') + (info.event ? ' — ' + escAttr(info.event) : '') + (info.standalone ? ' <span class="placeholder-sub" style="display:inline;">(no travel request)</span>' : '') + '</td><td>' + (info.standalone ? formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date) : formatDate(est.leave_date) + ' – ' + formatDate(est.return_date)) + '</td>'
           + '<td><span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></td>'
-          + '<td>$' + grand.toFixed(2) + '</td><td>' + (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2) + '</td><td>' + action + '</td></tr>';
+          + '<td>$' + grand.toFixed(2) + '</td><td>' + (info.standalone ? '—' : (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2)) + '</td><td>' + action + '</td></tr>';
       }).join('') + '</tbody></table></div>';
 }
 
 function renderTexReadOnlyDetail(r, deniedNote){
   var wrap = document.getElementById('tex-detail-wrap');
-  var est = r.travel_estimates || {};
+  var info = texTripInfo(r);
   var grand = (parseFloat(r.actual_trip_lead_total) || 0) + (parseFloat(r.actual_eww_total) || 0);
   var variance = parseFloat(r.variance_total) || 0;
 
   wrap.innerHTML = '<div class="tk-entry-card">'
-    + '<div class="tk-section-title">Expense Report — ' + escAttr(est.destination_event || '—') + (est.event_name ? ' — ' + escAttr(est.event_name) : '') + ' <span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></div>'
+    + '<div class="tk-section-title">Expense Report — ' + escAttr(info.destination || '—') + (info.event ? ' — ' + escAttr(info.event) : '') + ' <span class="tk-status-pill ' + r.current_status + '">' + r.current_status + '</span></div>'
     + '<div class="placeholder-sub" style="margin-bottom:14px;">This report is ' + r.current_status + ' and can no longer be edited here.</div>'
     + (r.current_status === 'denied' && deniedNote ? '<div class="warning-box"><div><div class="warning-box-title">This report was denied</div><div class="warning-box-text">' + escAttr(deniedNote) + '</div></div></div>' : '')
     + '<div class="profile-grid">'
-    + travelReadOnlyField('Tracking Number', est.tracking_number || '—')
+    + travelReadOnlyField('Tracking Number', info.tracking || '—')
     + travelReadOnlyField('Actual Dates', formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date))
     + travelReadOnlyField('Number of Travelers', r.number_of_trainers)
     + travelReadOnlyField('Trip Lead Total', '$' + (parseFloat(r.actual_trip_lead_total) || 0).toFixed(2))
     + travelReadOnlyField('EWW Total', '$' + (parseFloat(r.actual_eww_total) || 0).toFixed(2))
     + travelReadOnlyField('Actual Grand Total', '$' + grand.toFixed(2))
-    + travelReadOnlyField('Variance vs. Estimate', (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2))
+    + travelReadOnlyField('Variance vs. Estimate', info.standalone ? 'Not applicable (no travel request)' : (variance >= 0 ? '+$' : '-$') + Math.abs(variance).toFixed(2))
     + travelReadOnlyField('Supervisor Decision', r.supervisor_status)
     + '</div>'
     + (Object.keys(r.variance_notes || {}).length
@@ -2277,18 +2406,25 @@ function texReadVarianceNotes(){
 function texBuildBody(targetStatus, inputs, estimateId){
   var calc = texCalc(inputs);
   var grand = calc.tripLeadTotal + calc.ewwTotal;
-  var estimateGrand = texLinkedEstimateTotals.tripLead + texLinkedEstimateTotals.eww;
+  var standalone = !estimateId;
+  var estimateGrand = standalone ? 0 : texLinkedEstimateTotals.tripLead + texLinkedEstimateTotals.eww;
 
   var body = {
-    estimate_id: estimateId, number_of_trainers: inputs.trainers,
+    estimate_id: estimateId || null, number_of_trainers: inputs.trainers,
     actual_leave_date: inputs.leaveDate || null, actual_return_date: inputs.returnDate || null,
     per_diem_meals_rate: inputs.mealsRate,
     actual_per_diem_meals_total: calc.perDiemMealsTotal, actual_per_traveler_subtotal: calc.perTravelerSubtotal,
     actual_trip_lead_total: calc.tripLeadTotal, actual_total_odc: calc.tripLeadTotal, actual_eww_total: calc.ewwTotal,
-    variance_total: grand - estimateGrand, variance_notes: texReadVarianceNotes(), current_status: targetStatus
+    variance_total: standalone ? 0 : grand - estimateGrand, variance_notes: texReadVarianceNotes(), current_status: targetStatus
   };
   texCostCategories.forEach(function(c){ body[c.column] = inputs[c.estimatedKey]; });
   if(targetStatus === 'submitted'){ body.supervisor_status = 'pending'; }
+  if(standalone){
+    var sa = texReadStandaloneFields();
+    body.event_name = sa.eventName || null;
+    body.destination_event = sa.destination;
+    body.contract_id = sa.contractId || null;
+  }
   return body;
 }
 
@@ -2299,8 +2435,11 @@ function texBuildBody(targetStatus, inputs, estimateId){
 // Mirrors the Travel Estimate side's teEnsureDraftId.
 async function texEnsureDraftId(){
   if(texEditingId){ return texEditingId; }
-  var estimateId = texEditingRow ? texEditingRow.estimate_id : (document.getElementById('tex-estimate-select') ? document.getElementById('tex-estimate-select').value : '');
-  if(!estimateId){ return null; }
+  var pickerEl = document.getElementById('tex-estimate-select');
+  var pickerVal = pickerEl ? pickerEl.value : '';
+  var standalone = texEditingRow ? !texEditingRow.estimate_id : pickerVal === '__standalone__';
+  var estimateId = standalone ? null : (texEditingRow ? texEditingRow.estimate_id : pickerVal);
+  if(!standalone && !estimateId){ return null; }
   var inputs = texReadFormInputs();
   var body = texBuildBody('draft', inputs, estimateId);
   try{
@@ -2345,7 +2484,7 @@ async function texUploadReceiptForCategory(category, files){
   var errorEl = document.getElementById('tex-form-error');
   var expenseId = await texEnsureDraftId();
   if(!expenseId){
-    if(errorEl){ errorEl.textContent = 'Select an authorized estimate before attaching receipts.'; }
+    if(errorEl){ errorEl.textContent = 'Choose an authorized estimate (or "No travel request") before attaching receipts.'; }
     return;
   }
   for(var i = 0; i < files.length; i++){
@@ -2407,6 +2546,7 @@ async function texFetchExpenseEmailData(expenseId){
 
 function buildTravelExpenseEmailHtml(r){
   var est = r.travel_estimates || {};
+  var info = texTripInfo(r);
   var estimated = texComputeEstimatedCosts(est);
   var appUrl = window.location.origin + window.location.pathname;
   var tableStyle = 'width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;';
@@ -2421,7 +2561,7 @@ function buildTravelExpenseEmailHtml(r){
   }).map(function(c){
     var est$ = parseFloat(estimated[c.estimatedKey]) || 0, act$ = parseFloat(r[c.column]) || 0;
     var diff = act$ - est$;
-    return '<tr><td style="' + tdStyle + '">' + escAttr(c.label) + '</td><td style="' + tdStyle + '">' + (est$ > 0 ? '$' + est$.toFixed(2) : '—') + '</td><td style="' + tdStyle + '">$' + act$.toFixed(2) + '</td><td style="' + tdStyle + '">' + (diff >= 0 ? '+$' : '-$') + Math.abs(diff).toFixed(2) + '</td></tr>';
+    return '<tr><td style="' + tdStyle + '">' + escAttr(c.label) + '</td><td style="' + tdStyle + '">' + (est$ > 0 ? '$' + est$.toFixed(2) : '—') + '</td><td style="' + tdStyle + '">$' + act$.toFixed(2) + '</td><td style="' + tdStyle + '">' + (info.standalone ? '—' : (diff >= 0 ? '+$' : '-$') + Math.abs(diff).toFixed(2)) + '</td></tr>';
   }).join('');
   var noteKeys = Object.keys(notes);
   var notesHtml = noteKeys.length
@@ -2437,9 +2577,9 @@ function buildTravelExpenseEmailHtml(r){
   var grand = (parseFloat(r.actual_trip_lead_total) || 0) + (parseFloat(r.actual_eww_total) || 0);
   var estGrand = (parseFloat(est.trip_lead_total) || 0) + (parseFloat(est.eww_total) || 0);
   return '<div style="font-family:Arial,sans-serif;color:#1B1D22;max-width:640px;">'
-    + '<h2 style="font-size:18px;color:#122A54;margin-bottom:4px;">' + escAttr(est.destination_event || '—') + (est.event_name ? ' — ' + escAttr(est.event_name) : '') + '</h2>'
-    + '<p style="color:#5C607E;font-size:13px;margin-top:0;">' + formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date) + ' (' + nights + ' nights) · ' + (r.number_of_trainers || 1) + ' traveler(s)' + (est.tracking_number ? ' · Tracking #: <strong>' + escAttr(est.tracking_number) + '</strong>' : '') + '</p>'
-    + '<h3 style="' + h3Style + '">Actual costs vs. estimate</h3>'
+    + '<h2 style="font-size:18px;color:#122A54;margin-bottom:4px;">' + escAttr(info.destination || '—') + (info.event ? ' — ' + escAttr(info.event) : '') + '</h2>'
+    + '<p style="color:#5C607E;font-size:13px;margin-top:0;">' + formatDate(r.actual_leave_date) + ' – ' + formatDate(r.actual_return_date) + ' (' + nights + ' nights) · ' + (r.number_of_trainers || 1) + ' traveler(s)' + (info.standalone ? ' · No travel request' : '') + (info.tracking ? ' · Tracking #: <strong>' + escAttr(info.tracking) + '</strong>' : '') + '</p>'
+    + '<h3 style="' + h3Style + '">' + (info.standalone ? 'Actual costs' : 'Actual costs vs. estimate') + '</h3>'
     + '<table style="' + tableStyle + '"><tr><th style="' + thStyle + '">Category</th><th style="' + thStyle + '">Estimated</th><th style="' + thStyle + '">Actual</th><th style="' + thStyle + '">Difference</th></tr>' + lines + '</table>'
     + notesHtml
     + '<h3 style="' + h3Style + '">Totals</h3>'
@@ -2447,10 +2587,9 @@ function buildTravelExpenseEmailHtml(r){
     + totalsRow('Per Diem Meals Total (per traveler)', parseFloat(r.actual_per_diem_meals_total) || 0)
     + totalsRow('Per Traveler Subtotal', parseFloat(r.actual_per_traveler_subtotal) || 0)
     + totalsRow('Trip Lead Total', parseFloat(r.actual_trip_lead_total) || 0)
-    + totalsRow('EWW Total (verified by payroll)', parseFloat(r.actual_eww_total) || 0)
+    + (info.standalone ? '' : totalsRow('EWW Total (verified by payroll)', parseFloat(r.actual_eww_total) || 0))
     + totalsRow('Actual Grand Total', grand)
-    + totalsRow('Estimated Grand Total', estGrand)
-    + totalsRow('Variance vs. Estimate', parseFloat(r.variance_total) || 0, true)
+    + (info.standalone ? '' : totalsRow('Estimated Grand Total', estGrand) + totalsRow('Variance vs. Estimate', parseFloat(r.variance_total) || 0, true))
     + '</table>'
     + '<p style="margin-top:20px;"><a href="' + appUrl + '" style="color:#2AB8A6;">Open the app</a></p>'
     + '</div>';
@@ -2460,12 +2599,19 @@ async function submitTravelExpense(targetStatus){
   var errorEl = document.getElementById('tex-form-error');
   errorEl.textContent = '';
 
-  var estimateId = texEditingRow ? texEditingRow.estimate_id : (document.getElementById('tex-estimate-select') ? document.getElementById('tex-estimate-select').value : '');
-  if(!estimateId){ errorEl.textContent = 'Select an authorized estimate first.'; return; }
+  var pickerEl = document.getElementById('tex-estimate-select');
+  var pickerVal = pickerEl ? pickerEl.value : '';
+  var standalone = texEditingRow ? !texEditingRow.estimate_id : pickerVal === '__standalone__';
+  var estimateId = standalone ? null : (texEditingRow ? texEditingRow.estimate_id : pickerVal);
+  if(!standalone && !estimateId){ errorEl.textContent = 'Choose an authorized estimate (or "No travel request") first.'; return; }
 
   var inputs = texReadFormInputs();
   if(targetStatus === 'submitted'){
     if(!inputs.leaveDate || !inputs.returnDate){ errorEl.textContent = 'Actual leave and return dates are required to submit.'; return; }
+    if(standalone){
+      var saCheck = texReadStandaloneFields();
+      if(!saCheck.eventName || !saCheck.contractId){ errorEl.textContent = 'Event / Purpose and Contract are required to submit an expense without a travel request.'; return; }
+    }
     if(new Date(inputs.returnDate) < new Date(inputs.leaveDate)){ errorEl.textContent = 'Actual return date must be on or after leave date.'; return; }
     var missingVarianceNote = texCostCategories.find(function(c){
       var fieldEl = document.getElementById(c.fieldId);
@@ -2512,13 +2658,12 @@ async function submitTravelExpense(targetStatus){
     });
 
     if(targetStatus === 'submitted'){
-      await supabaseClient.from('travel_estimates').update({ status: 'expensed' }).eq('id', estimateId);
+      if(estimateId){ await supabaseClient.from('travel_estimates').update({ status: 'expensed' }).eq('id', estimateId); }
       // Same two-send pattern as the estimate: a copy for the submitter and a
       // distinct "action needed" copy for the Supervisor, both to this inbox.
       var expData = await texFetchExpenseEmailData(newId);
       if(expData){
-        var expEst = expData.travel_estimates || {};
-        var expSubject = (expEst.destination_event || expEst.event_name || 'your trip') + teTrackingSuffix(expEst.tracking_number);
+        var expSubject = texSubjectLabel(expData);
         var expHtml = buildTravelExpenseEmailHtml(expData);
         notifySelf('Expense report submitted — ' + expSubject, '<p>Your expense report has been submitted. Here\'s a copy for your records.</p>' + expHtml);
         notifySelf('Action needed: review expense report as Supervisor — ' + expSubject, '<p>An expense report needs your review. Switch to your Supervisor view to approve it.</p>' + expHtml);
@@ -2546,6 +2691,7 @@ async function openExpenseApproval(expenseId){
   if(!rows || !rows.length){ detail.innerHTML = ''; return; }
   var r = rows[0];
   var est = r.travel_estimates || {};
+  var info = texTripInfo(r);
   var names = await employeeNamesById([r.created_by]);
 
   // Same form the employee filled out, loaded the same way their draft
@@ -2559,9 +2705,11 @@ async function openExpenseApproval(expenseId){
   var approverDetailsHtml = '<div class="resume-section"><div class="resume-section-title">Approver Details</div>'
     + '<div class="profile-grid">'
     + travelReadOnlyField('Submitted By', names[r.created_by] || '—')
-    + travelReadOnlyField('Estimated Dates', formatDate(est.leave_date) + ' – ' + formatDate(est.return_date))
-    + travelReadOnlyField('Categories >10% Over Estimate', String(overCount))
-    + travelReadOnlyField('Added Categories (not on estimate)', String(texAdditionalCategories.length))
+    + (info.standalone
+        ? travelReadOnlyField('Travel Request', 'None (standalone expense)') + travelReadOnlyField('Event / Purpose', info.event)
+        : travelReadOnlyField('Estimated Dates', formatDate(est.leave_date) + ' – ' + formatDate(est.return_date)))
+    + travelReadOnlyField('Tracking Number', info.tracking || 'Assigned on approval')
+    + (info.standalone ? '' : travelReadOnlyField('Categories >10% Over Estimate', String(overCount)) + travelReadOnlyField('Added Categories (not on estimate)', String(texAdditionalCategories.length)))
     + '</div>'
     + '<div class="placeholder-sub" style="margin-top:8px;">Below is the expense report exactly as submitted, with the employee\'s explanations for anything over estimate or added.</div>'
     + '</div>';
@@ -2575,13 +2723,24 @@ async function openExpenseApproval(expenseId){
       + '</div>'
     : '';
 
-  var footerHtml = otherReceiptsHtml
+  // A standalone report has no estimate to carry a SLIN, so the approver picks
+  // Contract / Task Order / SLIN here; the tracking number is issued from it.
+  var billingHtml = (info.standalone && !r.tracking_number)
+    ? '<div class="resume-section"><div class="resume-section-title">Billing Assignment (required to approve — this expense has no travel request)</div>'
+      + '<div class="tk-pto-form-grid" style="grid-template-columns:1fr 1fr 1fr;">'
+      + '<div><label class="field-label" for="te-approval-contract">Contract</label><select class="field-input" id="te-approval-contract" onchange="teApprovalContractChanged()">' + contractOptionsHtml(r.contract_id) + '</select></div>'
+      + '<div><label class="field-label" for="te-approval-task-order">Task Order</label><select class="field-input" id="te-approval-task-order" onchange="teApprovalTaskOrderChanged()">' + teApprovalTaskOrderOptionsHtml(r.contract_id, r.task_order_node_id) + '</select></div>'
+      + '<div><label class="field-label" for="te-approval-slin">SLIN</label><select class="field-input" id="te-approval-slin">' + teApprovalSlinOptionsHtml(r.task_order_node_id, r.slin_id) + '</select></div>'
+      + '</div></div>'
+    : '';
+
+  var footerHtml = otherReceiptsHtml + billingHtml
     + '<div id="travel-approval-note-wrap" style="display:none;margin-top:10px;"><label class="field-label">Note (required for Return or Deny)</label><textarea class="info-edit-input" id="travel-approval-note" rows="2"></textarea></div>'
     + '<div class="login-error" id="travel-approval-error"></div>'
     + '<div class="profile-actions">'
-    + '<button class="btn-save" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + r.estimate_id + '\',\'approved\')">Approve (finalizes reimbursement)</button>'
-    + '<button class="btn-edit" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + r.estimate_id + '\',\'returned\')">Return</button>'
-    + '<button class="btn-cancel" style="color:var(--red);border-color:var(--red);" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + r.estimate_id + '\',\'denied\')">Deny</button>'
+    + '<button class="btn-save" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + (r.estimate_id || '') + '\',\'approved\')">Approve (finalizes reimbursement)</button>'
+    + '<button class="btn-edit" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + (r.estimate_id || '') + '\',\'returned\')">Return</button>'
+    + '<button class="btn-cancel" style="color:var(--red);border-color:var(--red);" onclick="expenseApprovalAction(\'' + r.id + '\',\'' + (r.estimate_id || '') + '\',\'denied\')">Deny</button>'
     + '<button class="btn-cancel" onclick="texCloseExpenseReview()">Close</button>'
     + '</div>';
 
@@ -2610,15 +2769,34 @@ async function expenseApprovalAction(expenseId, estimateId, decision){
     errorEl.textContent = 'A note is required to return or deny this report.';
     return;
   }
+  // Present only on a standalone report that has no tracking number yet.
+  var billing = null;
+  if(decision === 'approved' && document.getElementById('te-approval-slin')){
+    billing = {
+      contractId: document.getElementById('te-approval-contract').value,
+      taskOrderId: document.getElementById('te-approval-task-order').value,
+      slinId: document.getElementById('te-approval-slin').value
+    };
+    if(!billing.contractId || !billing.taskOrderId || !billing.slinId){
+      errorEl.textContent = 'Select the Contract, Task Order, and SLIN to bill this expense to before approving.';
+      return;
+    }
+  }
   try{
-    var { data: existing } = await supabaseClient.from('travel_expenses').select('current_status').eq('id', expenseId).limit(1);
+    var { data: existing } = await supabaseClient.from('travel_expenses').select('current_status,tracking_number').eq('id', expenseId).limit(1);
     var previousStatus = existing && existing.length ? existing[0].current_status : null;
+    var existingTracking = existing && existing.length ? existing[0].tracking_number : null;
 
     var body = { supervisor_status: decision, current_status: decision === 'approved' ? 'approved' : decision };
+    if(billing){
+      // Same rule as estimates: the number is issued once, at the first approval.
+      body.contract_id = billing.contractId; body.task_order_node_id = billing.taskOrderId; body.slin_id = billing.slinId;
+      body.tracking_number = existingTracking || await teAssignTrackingNumber(billing.slinId);
+    }
     var { error } = await supabaseClient.from('travel_expenses').update(body).eq('id', expenseId);
     if(error){ throw error; }
 
-    if(decision === 'approved'){
+    if(decision === 'approved' && estimateId){
       await supabaseClient.from('travel_estimates').update({ status: 'paid' }).eq('id', estimateId);
     }
 
@@ -2629,8 +2807,8 @@ async function expenseApprovalAction(expenseId, estimateId, decision){
 
     var decidedExp = await texFetchExpenseEmailData(expenseId);
     if(decidedExp){
-      var decEst = decidedExp.travel_estimates || {};
-      var decSubject = (decEst.destination_event || decEst.event_name || 'your trip') + teTrackingSuffix(decEst.tracking_number);
+      var decEst = texNoticeIdentity(decidedExp);
+      var decSubject = texSubjectLabel(decidedExp);
       var decNote = noteField ? noteField.value.trim() : '';
       if(decision === 'approved'){
         notifySelf('Expense report approved — ' + decSubject, '<p>You approved this expense report. Reimbursement is finalized and the trip is closed out as paid.</p>' + buildTravelExpenseEmailHtml(decidedExp));
